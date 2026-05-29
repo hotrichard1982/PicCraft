@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:build": "tauri build && node scripts/copy-dist.mjs"
+    "tauri:build": "node scripts/copy-dist.mjs"
   },
   "dependencies": {
     "@radix-ui/react-label": "^2.1.8",
