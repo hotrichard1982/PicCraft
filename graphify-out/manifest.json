@@ -1,0 +1,302 @@
+{
+  "E:\\code\\piccarft\\.graphify_detect.json": {
+    "mtime": 1779127596.8246877,
+    "ast_hash": "6bc7e774b32604af09cfe0f32a473b0e",
+    "semantic_hash": "6bc7e774b32604af09cfe0f32a473b0e"
+  },
+  "E:\\code\\piccarft\\components.json": {
+    "mtime": 1779121953.5097215,
+    "ast_hash": "0bccc9919c1836ad683bf1aa2bca8914",
+    "semantic_hash": "0bccc9919c1836ad683bf1aa2bca8914"
+  },
+  "E:\\code\\piccarft\\eslint.config.js": {
+    "mtime": 1779121278.084044,
+    "ast_hash": "0355276bc79439afe3c53e3a2470ca1e",
+    "semantic_hash": "0355276bc79439afe3c53e3a2470ca1e"
+  },
+  "E:\\code\\piccarft\\package.json": {
+    "mtime": 1779126637.2316303,
+    "ast_hash": "92932900cd0d4f241f7c025e38c66ef3",
+    "semantic_hash": "92932900cd0d4f241f7c025e38c66ef3"
+  },
+  "E:\\code\\piccarft\\postcss.config.js": {
+    "mtime": 1779121815.1778076,
+    "ast_hash": "ef3ba2a81ba19f8ea5ddf625521e96f0",
+    "semantic_hash": "ef3ba2a81ba19f8ea5ddf625521e96f0"
+  },
+  "E:\\code\\piccarft\\tailwind.config.js": {
+    "mtime": 1779121937.3849308,
+    "ast_hash": "9cf7650508ada3fb6347f2fe1799b9f5",
+    "semantic_hash": "9cf7650508ada3fb6347f2fe1799b9f5"
+  },
+  "E:\\code\\piccarft\\tsconfig.app.json": {
+    "mtime": 1779122461.9067564,
+    "ast_hash": "eae52dd9e22c909dd27deb57667dac52",
+    "semantic_hash": "eae52dd9e22c909dd27deb57667dac52"
+  },
+  "E:\\code\\piccarft\\tsconfig.json": {
+    "mtime": 1779121278.226751,
+    "ast_hash": "a3d39fa780ebff65444de257f291ce6c",
+    "semantic_hash": "a3d39fa780ebff65444de257f291ce6c"
+  },
+  "E:\\code\\piccarft\\tsconfig.node.json": {
+    "mtime": 1779121278.2329218,
+    "ast_hash": "70bdd0a673bcfc0e828080b306e7c680",
+    "semantic_hash": "70bdd0a673bcfc0e828080b306e7c680"
+  },
+  "E:\\code\\piccarft\\vite.config.ts": {
+    "mtime": 1779121862.4408295,
+    "ast_hash": "326994cbcdd30d8d491c80ebde461489",
+    "semantic_hash": "326994cbcdd30d8d491c80ebde461489"
+  },
+  "E:\\code\\piccarft\\@\\components\\ui\\button.tsx": {
+    "mtime": 1779121972.3246958,
+    "ast_hash": "705bf3552a39e0c722665ccbecb30654",
+    "semantic_hash": "705bf3552a39e0c722665ccbecb30654"
+  },
+  "E:\\code\\piccarft\\@\\components\\ui\\card.tsx": {
+    "mtime": 1779121989.821456,
+    "ast_hash": "f493f1f077059a080b2c475873def5c0",
+    "semantic_hash": "f493f1f077059a080b2c475873def5c0"
+  },
+  "E:\\code\\piccarft\\@\\components\\ui\\input.tsx": {
+    "mtime": 1779121989.8690896,
+    "ast_hash": "0607b02d99a2e92f9509223f36ccc6ec",
+    "semantic_hash": "0607b02d99a2e92f9509223f36ccc6ec"
+  },
+  "E:\\code\\piccarft\\@\\components\\ui\\label.tsx": {
+    "mtime": 1779121989.9219718,
+    "ast_hash": "92c6cf712c42f55463403a9241294aa0",
+    "semantic_hash": "92c6cf712c42f55463403a9241294aa0"
+  },
+  "E:\\code\\piccarft\\@\\components\\ui\\separator.tsx": {
+    "mtime": 1779121989.7626975,
+    "ast_hash": "3de2dca3e47ab29c4b1f632671545628",
+    "semantic_hash": "3de2dca3e47ab29c4b1f632671545628"
+  },
+  "E:\\code\\piccarft\\@\\components\\ui\\tabs.tsx": {
+    "mtime": 1779121989.6966217,
+    "ast_hash": "cdb34ac71e18c5b2aee54836f09081b4",
+    "semantic_hash": "cdb34ac71e18c5b2aee54836f09081b4"
+  },
+  "E:\\code\\piccarft\\src\\App.tsx": {
+    "mtime": 1779122341.931266,
+    "ast_hash": "6acc0531c0c05bebf863ba8ea7cecf3a",
+    "semantic_hash": "6acc0531c0c05bebf863ba8ea7cecf3a"
+  },
+  "E:\\code\\piccarft\\src\\main.tsx": {
+    "mtime": 1779121278.532274,
+    "ast_hash": "787e5a07efeb2bf6209d5937195f2f68",
+    "semantic_hash": "787e5a07efeb2bf6209d5937195f2f68"
+  },
+  "E:\\code\\piccarft\\src\\components\\AboutTab.tsx": {
+    "mtime": 1779122232.7065198,
+    "ast_hash": "76ba29876e2c57862e290464d4f3f884",
+    "semantic_hash": "76ba29876e2c57862e290464d4f3f884"
+  },
+  "E:\\code\\piccarft\\src\\components\\BatchTab.tsx": {
+    "mtime": 1779126071.7705421,
+    "ast_hash": "1e86cbbbdab429b4e7a43e3041b0dfcb",
+    "semantic_hash": "1e86cbbbdab429b4e7a43e3041b0dfcb"
+  },
+  "E:\\code\\piccarft\\src\\components\\CropCanvas.tsx": {
+    "mtime": 1779125457.2758172,
+    "ast_hash": "b812cf52f4642bd51530230a2d395fd9",
+    "semantic_hash": "b812cf52f4642bd51530230a2d395fd9"
+  },
+  "E:\\code\\piccarft\\src\\components\\Header.tsx": {
+    "mtime": 1779122208.2180314,
+    "ast_hash": "a4bc72f047a1ce59c4aa648f736681b4",
+    "semantic_hash": "a4bc72f047a1ce59c4aa648f736681b4"
+  },
+  "E:\\code\\piccarft\\src\\components\\SingleTab.tsx": {
+    "mtime": 1779125475.6498652,
+    "ast_hash": "6e58da5521340cba788ea633d585ff5f",
+    "semantic_hash": "6e58da5521340cba788ea633d585ff5f"
+  },
+  "E:\\code\\piccarft\\src\\components\\ui\\button.tsx": {
+    "mtime": 1779122106.142363,
+    "ast_hash": "b654fd2e00671113781d4edf49a0605e",
+    "semantic_hash": "b654fd2e00671113781d4edf49a0605e"
+  },
+  "E:\\code\\piccarft\\src\\components\\ui\\card.tsx": {
+    "mtime": 1779122146.1832087,
+    "ast_hash": "9d5026eeca8787db2867b6643cc0741b",
+    "semantic_hash": "9d5026eeca8787db2867b6643cc0741b"
+  },
+  "E:\\code\\piccarft\\src\\components\\ui\\input.tsx": {
+    "mtime": 1779122153.6553137,
+    "ast_hash": "957b09fc6386dbbfb0dbffd0ce6af85b",
+    "semantic_hash": "957b09fc6386dbbfb0dbffd0ce6af85b"
+  },
+  "E:\\code\\piccarft\\src\\components\\ui\\label.tsx": {
+    "mtime": 1779122160.7523155,
+    "ast_hash": "356cc7f3e58cebfac0a0059a60047dff",
+    "semantic_hash": "356cc7f3e58cebfac0a0059a60047dff"
+  },
+  "E:\\code\\piccarft\\src\\components\\ui\\separator.tsx": {
+    "mtime": 1779122130.1817708,
+    "ast_hash": "74c934cf420a34e7ba3dab9389d34d88",
+    "semantic_hash": "74c934cf420a34e7ba3dab9389d34d88"
+  },
+  "E:\\code\\piccarft\\src\\components\\ui\\tabs.tsx": {
+    "mtime": 1779122122.7713203,
+    "ast_hash": "6f9517cfe375c41948a485679a5d9101",
+    "semantic_hash": "6f9517cfe375c41948a485679a5d9101"
+  },
+  "E:\\code\\piccarft\\src\\hooks\\use-theme.ts": {
+    "mtime": 1779122193.7970412,
+    "ast_hash": "04b2d78188c3a82423bf29c960a27d8b",
+    "semantic_hash": "04b2d78188c3a82423bf29c960a27d8b"
+  },
+  "E:\\code\\piccarft\\src\\lib\\utils.ts": {
+    "mtime": 1779122090.8480136,
+    "ast_hash": "5a6fd53fdcf2be529e9cc0b718fde352",
+    "semantic_hash": "5a6fd53fdcf2be529e9cc0b718fde352"
+  },
+  "E:\\code\\piccarft\\src-tauri\\build.rs": {
+    "mtime": 1779121693.2100577,
+    "ast_hash": "8e6c89bd412b755ef41bd9bb191f2e31",
+    "semantic_hash": "8e6c89bd412b755ef41bd9bb191f2e31"
+  },
+  "E:\\code\\piccarft\\src-tauri\\tauri.conf.json": {
+    "mtime": 1779125742.2385826,
+    "ast_hash": "1ae65ed3fd8f13487a7916ec9082f064",
+    "semantic_hash": "1ae65ed3fd8f13487a7916ec9082f064"
+  },
+  "E:\\code\\piccarft\\src-tauri\\capabilities\\default.json": {
+    "mtime": 1779125854.502989,
+    "ast_hash": "02b876fa211697abb1d31dc8454692d0",
+    "semantic_hash": "02b876fa211697abb1d31dc8454692d0"
+  },
+  "E:\\code\\piccarft\\src-tauri\\gen\\schemas\\acl-manifests.json": {
+    "mtime": 1779124878.412504,
+    "ast_hash": "1fe91e3de22d5d028442b99a61e60869",
+    "semantic_hash": "1fe91e3de22d5d028442b99a61e60869"
+  },
+  "E:\\code\\piccarft\\src-tauri\\gen\\schemas\\capabilities.json": {
+    "mtime": 1779124878.425301,
+    "ast_hash": "2776aa5eea2c8dfedc0c50d8d9ef5f18",
+    "semantic_hash": "2776aa5eea2c8dfedc0c50d8d9ef5f18"
+  },
+  "E:\\code\\piccarft\\src-tauri\\gen\\schemas\\desktop-schema.json": {
+    "mtime": 1779124878.4211845,
+    "ast_hash": "49119adc2de4e4d0878071ce1600b0e8",
+    "semantic_hash": "49119adc2de4e4d0878071ce1600b0e8"
+  },
+  "E:\\code\\piccarft\\src-tauri\\gen\\schemas\\windows-schema.json": {
+    "mtime": 1779124878.4211845,
+    "ast_hash": "49119adc2de4e4d0878071ce1600b0e8",
+    "semantic_hash": "49119adc2de4e4d0878071ce1600b0e8"
+  },
+  "E:\\code\\piccarft\\src-tauri\\src\\image_ops.rs": {
+    "mtime": 1779125916.1955397,
+    "ast_hash": "5c40a8349bfcc7019186fb28e025c20c",
+    "semantic_hash": "5c40a8349bfcc7019186fb28e025c20c"
+  },
+  "E:\\code\\piccarft\\src-tauri\\src\\lib.rs": {
+    "mtime": 1779125627.1956806,
+    "ast_hash": "dd09b9c5ad409a514f145f7cef4c8499",
+    "semantic_hash": "dd09b9c5ad409a514f145f7cef4c8499"
+  },
+  "E:\\code\\piccarft\\src-tauri\\src\\main.rs": {
+    "mtime": 1779121693.2172248,
+    "ast_hash": "a8e64e9b6bd150703cbc12bc0d188f24",
+    "semantic_hash": "a8e64e9b6bd150703cbc12bc0d188f24"
+  },
+  "E:\\code\\piccarft\\AGENTS.md": {
+    "mtime": 1779127065.5125442,
+    "ast_hash": "97f0cf117adc2c4a9aa1ccf66d1b8c1c",
+    "semantic_hash": "97f0cf117adc2c4a9aa1ccf66d1b8c1c"
+  },
+  "E:\\code\\piccarft\\index.html": {
+    "mtime": 1779121314.243521,
+    "ast_hash": "8af4d4e92dd162c136cd892aa5e25de6",
+    "semantic_hash": "8af4d4e92dd162c136cd892aa5e25de6"
+  },
+  "E:\\code\\piccarft\\README.md": {
+    "mtime": 1779127133.6787698,
+    "ast_hash": "f9d1b2bb73b857ad2e5350605d81376a",
+    "semantic_hash": "f9d1b2bb73b857ad2e5350605d81376a"
+  },
+  "E:\\code\\piccarft\\docs\\plans\\2026-05-19-piccraft-tauri-refactor.md": {
+    "mtime": 1779121172.8432827,
+    "ast_hash": "dc087637e559d3cd8485041e4101b30b",
+    "semantic_hash": "dc087637e559d3cd8485041e4101b30b"
+  },
+  "E:\\code\\piccarft\\public\\logo.png": {
+    "mtime": 1778055970.7620058,
+    "ast_hash": "688dc36b6c8b56d2cf1c46944599f453",
+    "semantic_hash": "688dc36b6c8b56d2cf1c46944599f453"
+  },
+  "E:\\code\\piccarft\\src-tauri\\icons\\128x128.png": {
+    "mtime": 1779121693.2110856,
+    "ast_hash": "3a0071e4ad670fad0329d3a5e83d0bf9",
+    "semantic_hash": "3a0071e4ad670fad0329d3a5e83d0bf9"
+  },
+  "E:\\code\\piccarft\\src-tauri\\icons\\128x128@2x.png": {
+    "mtime": 1779121693.2120895,
+    "ast_hash": "eab2be12c5f8aeaf104a4695dd9171df",
+    "semantic_hash": "eab2be12c5f8aeaf104a4695dd9171df"
+  },
+  "E:\\code\\piccarft\\src-tauri\\icons\\32x32.png": {
+    "mtime": 1779121693.2120895,
+    "ast_hash": "faf8ee6541b945b98db35239b8a75715",
+    "semantic_hash": "faf8ee6541b945b98db35239b8a75715"
+  },
+  "E:\\code\\piccarft\\src-tauri\\icons\\icon.png": {
+    "mtime": 1779121693.2162266,
+    "ast_hash": "9fdc4367276aafdd2c05ac214e9553c7",
+    "semantic_hash": "9fdc4367276aafdd2c05ac214e9553c7"
+  },
+  "E:\\code\\piccarft\\src-tauri\\icons\\Square107x107Logo.png": {
+    "mtime": 1779121693.2120895,
+    "ast_hash": "d4bc38359e2c01daa08354c55fa4df7c",
+    "semantic_hash": "d4bc38359e2c01daa08354c55fa4df7c"
+  },
+  "E:\\code\\piccarft\\src-tauri\\icons\\Square142x142Logo.png": {
+    "mtime": 1779121693.2120895,
+    "ast_hash": "1e9c0358705085439e5c989fcbd6e988",
+    "semantic_hash": "1e9c0358705085439e5c989fcbd6e988"
+  },
+  "E:\\code\\piccarft\\src-tauri\\icons\\Square150x150Logo.png": {
+    "mtime": 1779121693.2130892,
+    "ast_hash": "084d20bce8096367fc694dfdf72c8ac5",
+    "semantic_hash": "084d20bce8096367fc694dfdf72c8ac5"
+  },
+  "E:\\code\\piccarft\\src-tauri\\icons\\Square284x284Logo.png": {
+    "mtime": 1779121693.2130892,
+    "ast_hash": "6a936fe84398f24b7a63a36bddfd58d7",
+    "semantic_hash": "6a936fe84398f24b7a63a36bddfd58d7"
+  },
+  "E:\\code\\piccarft\\src-tauri\\icons\\Square30x30Logo.png": {
+    "mtime": 1779121693.2130892,
+    "ast_hash": "011e9cb456309157a9fc78c978248e00",
+    "semantic_hash": "011e9cb456309157a9fc78c978248e00"
+  },
+  "E:\\code\\piccarft\\src-tauri\\icons\\Square310x310Logo.png": {
+    "mtime": 1779121693.2130892,
+    "ast_hash": "832231852e8e683e6aa2b690d194bdd2",
+    "semantic_hash": "832231852e8e683e6aa2b690d194bdd2"
+  },
+  "E:\\code\\piccarft\\src-tauri\\icons\\Square44x44Logo.png": {
+    "mtime": 1779121693.214226,
+    "ast_hash": "a06297a35014e770cc33756fafa3b3a8",
+    "semantic_hash": "a06297a35014e770cc33756fafa3b3a8"
+  },
+  "E:\\code\\piccarft\\src-tauri\\icons\\Square71x71Logo.png": {
+    "mtime": 1779121693.214226,
+    "ast_hash": "a3c80a0af688359094aa685881570eed",
+    "semantic_hash": "a3c80a0af688359094aa685881570eed"
+  },
+  "E:\\code\\piccarft\\src-tauri\\icons\\Square89x89Logo.png": {
+    "mtime": 1779121693.214226,
+    "ast_hash": "9f91ee8e1c1232ebde61c64d7923038f",
+    "semantic_hash": "9f91ee8e1c1232ebde61c64d7923038f"
+  },
+  "E:\\code\\piccarft\\src-tauri\\icons\\StoreLogo.png": {
+    "mtime": 1779121693.215226,
+    "ast_hash": "387b412d411bbd532dd3302d3948bf0e",
+    "semantic_hash": "387b412d411bbd532dd3302d3948bf0e"
+  }
+}
