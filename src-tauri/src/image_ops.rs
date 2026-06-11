@@ -65,14 +65,12 @@ pub fn get_image_info(path: String) -> Result<ImageInfo, String> {
     })
 }
 
-/// 缩放图片并保存到临时文件
+/// 缩放图片并保存到临时文件（前端已计算好等比尺寸）
 #[tauri::command]
 pub fn resize_image(
     path: String,
     target_width: u32,
     target_height: u32,
-    keep_aspect: bool,
-    quality: u8,
 ) -> Result<ImageResult, String> {
     if target_width == 0 || target_height == 0 {
         return Err("目标宽度和高度必须大于 0".to_string());
@@ -80,23 +78,15 @@ pub fn resize_image(
 
     let img = image::open(&path).map_err(|e| format!("无法打开图片: {e}"))?;
 
-    let (tw, th) = if keep_aspect {
-        let (ow, oh) = (img.width(), img.height());
-        let ratio = (target_width as f64 / ow as f64).min(target_height as f64 / oh as f64);
-        ((ow as f64 * ratio) as u32, (oh as f64 * ratio) as u32)
-    } else {
-        (target_width, target_height)
-    };
-
-    let resized = img.resize_exact(tw, th, FilterType::Lanczos3);
+    let resized = img.resize_exact(target_width, target_height, FilterType::Lanczos3);
 
     let temp_path = temp_file_path(&path, "resized")?;
-    save_to_temp(&resized, &temp_path, quality)?;
+    save_to_temp(&resized, &temp_path)?;
 
     Ok(ImageResult {
         temp_path: temp_path.to_string_lossy().to_string(),
-        width: tw,
-        height: th,
+        width: target_width,
+        height: target_height,
     })
 }
 
@@ -123,7 +113,7 @@ pub fn crop_image(
     let cropped = img.crop(x, y, width, height);
 
     let temp_path = temp_file_path(&path, "cropped")?;
-    save_to_temp(&cropped, &temp_path, 95)?;
+    save_to_temp(&cropped, &temp_path)?;
 
     Ok(ImageResult {
         temp_path: temp_path.to_string_lossy().to_string(),
@@ -346,18 +336,8 @@ fn temp_file_path(original: &str, suffix: &str) -> Result<PathBuf, String> {
     Ok(dir.join(filename))
 }
 
-fn save_to_temp(img: &DynamicImage, path: &PathBuf, quality: u8) -> Result<(), String> {
-    let q = quality.clamp(1, 100);
-    match path.extension().and_then(|e| e.to_str()) {
-        Some("png") => img.save(path).map_err(|e| format!("保存失败: {e}")),
-        _ => {
-            let rgb = img.to_rgb8();
-            let file = std::fs::File::create(path).map_err(|e| format!("创建文件失败: {e}"))?;
-            let mut encoder = JpegEncoder::new_with_quality(file, q);
-            encoder.encode(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8)
-                .map_err(|e| format!("编码失败: {e}"))
-        }
-    }
+fn save_to_temp(img: &DynamicImage, path: &PathBuf) -> Result<(), String> {
+    img.save(path).map_err(|e| format!("保存失败: {e}"))
 }
 
 fn png_colors(quality: u8) -> u32 {

@@ -1,3 +1,6 @@
+// ⚠️ 以下 MSVC / Windows SDK 路径为当前开发机硬编码，
+//    换机器或升级工具链后需更新版本号。
+//    MSVC: 14.44.35207  |  SDK: 10.0.26100.0
 import { execSync } from "child_process"
 import { cpSync, mkdirSync, existsSync } from "fs"
 import { resolve, join } from "path"
@@ -14,6 +17,12 @@ const sdkInc = "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0
 const sdkUcrtInc = "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt"
 const msvcInc = "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include"
 const rcExe = "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64\\rc.exe"
+
+if (!existsSync(msvcBin)) {
+  console.error(`❌ MSVC 工具链未找到: ${msvcBin}`)
+  console.error("   请安装 Visual Studio Build Tools 或更新脚本中的路径版本号")
+  process.exit(1)
+}
 
 const env = {
   ...process.env,

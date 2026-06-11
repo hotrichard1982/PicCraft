@@ -107,7 +107,6 @@ export function SingleTab() {
     try {
       const tw = parseInt(width) || 800
       const th = parseInt(height) || 600
-      const q = parseInt(quality) || 85
 
       let finalW = tw, finalH = th
       if (keepAspect && imageInfo) {
@@ -120,8 +119,6 @@ export function SingleTab() {
         path: tempPath || filePath,
         targetWidth: finalW,
         targetHeight: finalH,
-        keepAspect: false,
-        quality: q,
       })
 
       // Use asset protocol for temp file
@@ -133,7 +130,7 @@ export function SingleTab() {
     } catch (e) {
       setStatusText(`缩放失败：${e}`)
     }
-  }, [filePath, tempPath, width, height, keepAspect, quality, imageInfo])
+  }, [filePath, tempPath, width, height, keepAspect, imageInfo])
 
   // ─── Aspect Ratio ───
   const handleWidthChange = useCallback((value: string) => {

@@ -12,6 +12,15 @@ dist
 dist-ssr
 *.local
 
+# Rust build
+src-tauri/target/
+
+# Accidental path alias expansion
+@/
+
+# Code analysis output
+graphify-out/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
