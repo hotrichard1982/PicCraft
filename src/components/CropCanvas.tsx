@@ -1,7 +1,7 @@
-import { useRef, useState, useEffect, useCallback } from "react"
+import React, { useRef, useState, useEffect, useCallback } from "react"
 import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group } from "react-konva"
 import { convertFileSrc } from "@tauri-apps/api/core"
-import { listen } from "@tauri-apps/api/event"
+import { getCurrentWebview } from "@tauri-apps/api/webview"
 import type Konva from "konva"
 
 export interface CropRect {
@@ -23,8 +23,12 @@ const MIN_CROP = 5
 const STROKE_COLOR = "#ef4444"
 const STROKE_WIDTH = 2
 const OVERLAY_COLOR = "rgba(0,0,0,0.45)"
+const CROP_ANCHORS: string[] = ["top-left", "top-center", "top-right", "middle-left", "middle-right", "bottom-left", "bottom-center", "bottom-right"]
 
-export function CropCanvas({ imagePath, onCropChange, onFileDrop, cropRect }: CropCanvasProps) {
+const boundBoxFn = (oldBox: { x: number; y: number; width: number; height: number; rotation: number }, newBox: { x: number; y: number; width: number; height: number; rotation: number }) =>
+  (newBox.width < MIN_CROP || newBox.height < MIN_CROP) ? oldBox : newBox
+
+function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect }: CropCanvasProps) {
   const stageRef = useRef<Konva.Stage>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
   const rectRef = useRef<Konva.Rect>(null)
@@ -34,26 +38,54 @@ export function CropCanvas({ imagePath, onCropChange, onFileDrop, cropRect }: Cr
   const [image, setImage] = useState<HTMLImageElement | null>(null)
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 })
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 })
+  const [isDragOver, setIsDragOver] = useState(false)
 
   const isDrawingRef = useRef(false)
+  const isShowingRef = useRef(false)
   const drawStartRef = useRef({ x: 0, y: 0 })
   const scaleRef = useRef(1)
   const offsetRef = useRef({ x: 0, y: 0 })
   const onCropChangeRef = useRef(onCropChange)
+  const onFileDropRef = useRef(onFileDrop)
+  const isDragOverRef = useRef(false)
+  const rafRef = useRef<number | null>(null)
 
   useEffect(() => { onCropChangeRef.current = onCropChange }, [onCropChange])
+  useEffect(() => { onFileDropRef.current = onFileDrop }, [onFileDrop])
+  useEffect(() => { isDragOverRef.current = isDragOver }, [isDragOver])
 
+  // ─── Drag & Drop (Tauri v2 webview-level API) ───
   useEffect(() => {
-    const unlisten = listen<{ paths: string[] }>("tauri://drag-drop", (event) => {
-      const path = event.payload.paths[0]
-      if (path) {
-        const ext = path.split(".").pop()?.toLowerCase() || ""
-        if (IMG_EXTS.includes(ext)) onFileDrop(path)
-      }
-    })
-    return () => { unlisten.then(fn => fn()) }
-  }, [onFileDrop])
+    let cancelled = false
+    let unlistenFn: (() => void) | null = null
 
+    const webview = getCurrentWebview()
+    webview.onDragDropEvent((event) => {
+      const { type } = event.payload
+      if (type === "drop") {
+        setIsDragOver(false)
+        const path = event.payload.paths[0]
+        if (path) {
+          const ext = path.split(".").pop()?.toLowerCase() || ""
+          if (IMG_EXTS.includes(ext)) onFileDropRef.current(path)
+        }
+      } else if (type === "over") {
+        setIsDragOver(true)
+      } else if (type === "leave") {
+        setIsDragOver(false)
+      }
+    }).then((fn) => {
+      if (cancelled) fn()
+      else unlistenFn = fn
+    })
+
+    return () => {
+      cancelled = true
+      if (unlistenFn) unlistenFn()
+    }
+  }, [])
+
+  // ─── Container Resize ───
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -65,29 +97,58 @@ export function CropCanvas({ imagePath, onCropChange, onFileDrop, cropRect }: Cr
     return () => observer.disconnect()
   }, [])
 
+  // ─── Image Loading ───
   useEffect(() => {
     if (!imagePath) return
-    const img = new window.Image()
-    img.onload = () => {
-      setImage(img)
-      setImageSize({ width: img.naturalWidth, height: img.naturalHeight })
+    let cancelled = false
+    let objectUrl: string | null = null
+
+    const loadImage = async () => {
+      try {
+        const assetUrl = imagePath.startsWith("http") || imagePath.startsWith("asset:") || imagePath.startsWith("blob:")
+          ? imagePath
+          : convertFileSrc(imagePath)
+
+        const response = await fetch(assetUrl)
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const blob = await response.blob()
+        if (cancelled) return
+
+        objectUrl = URL.createObjectURL(blob)
+        const img = new window.Image()
+        img.onload = () => {
+          if (cancelled) return
+          setImage(img)
+          setImageSize({ width: img.naturalWidth, height: img.naturalHeight })
+        }
+        img.onerror = () => {
+          console.error("[CropCanvas] Failed to load image from:", assetUrl)
+        }
+        img.src = objectUrl
+      } catch (err) {
+        console.error("[CropCanvas] Failed to fetch image:", err)
+      }
     }
-    const src = imagePath.startsWith("http") || imagePath.startsWith("asset:")
-      ? imagePath
-      : convertFileSrc(imagePath)
-    img.src = src
-    return () => { img.onload = null }
+
+    loadImage()
+
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
   }, [imagePath])
 
+  // ─── CropRect → Transformer sync (with isDrawing guard) ───
   useEffect(() => {
     if (cropRect && rectRef.current && transformerRef.current) {
       transformerRef.current.nodes([rectRef.current])
       transformerRef.current.getLayer()?.batchDraw()
-    } else if (transformerRef.current) {
+    } else if (transformerRef.current && !isDrawingRef.current) {
       transformerRef.current.nodes([])
     }
   }, [cropRect])
 
+  // ─── Escape key ───
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCropChange(null)
@@ -130,23 +191,37 @@ export function CropCanvas({ imagePath, onCropChange, onFileDrop, cropRect }: Cr
   }, [stageSize])
 
   const showCropUI = useCallback(() => {
+    if (isShowingRef.current) return
+    isShowingRef.current = true
     const group = overlayRef.current
     const rect = rectRef.current
     const tr = transformerRef.current
     if (group) group.visible(true)
     if (rect) rect.visible(true)
     if (tr && rect) {
+      if (isDrawingRef.current) {
+        tr.enabledAnchors([])
+        tr.borderEnabled(false)
+      } else {
+        tr.enabledAnchors(CROP_ANCHORS as never[])
+        tr.borderEnabled(true)
+      }
       tr.nodes([rect])
     }
   }, [])
 
   const hideCropUI = useCallback(() => {
+    isShowingRef.current = false
     const group = overlayRef.current
     const rect = rectRef.current
     const tr = transformerRef.current
     if (group) group.visible(false)
     if (rect) rect.visible(false)
-    if (tr) tr.nodes([])
+    if (tr) {
+      tr.enabledAnchors(CROP_ANCHORS as never[])
+      tr.borderEnabled(true)
+      tr.nodes([])
+    }
   }, [])
 
   useEffect(() => {
@@ -157,6 +232,7 @@ export function CropCanvas({ imagePath, onCropChange, onFileDrop, cropRect }: Cr
     }
   }, [cropRect, showCropUI, hideCropUI])
 
+  // ─── Mouse Handlers ───
   const handleMouseDown = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
     if (!image) return
     if (e.target !== e.target.getStage()) return
@@ -165,46 +241,64 @@ export function CropCanvas({ imagePath, onCropChange, onFileDrop, cropRect }: Cr
     const img = stageToImage(pos.x, pos.y)
     drawStartRef.current = { x: img.x, y: img.y }
     isDrawingRef.current = true
+    isShowingRef.current = false
     onCropChange(null)
   }, [image, stageToImage, onCropChange])
 
-  const handleMouseMove = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
+  const handleMouseMove = useCallback(() => {
     if (!isDrawingRef.current || !image) return
-    const pos = e.target.getStage()!.getPointerPosition()
-    if (!pos) return
-    const img = stageToImage(pos.x, pos.y)
-    const ds = drawStartRef.current
-    const x1 = Math.max(0, Math.min(ds.x, img.x))
-    const y1 = Math.max(0, Math.min(ds.y, img.y))
-    const x2 = Math.min(imageSize.width, Math.max(ds.x, img.x))
-    const y2 = Math.min(imageSize.height, Math.max(ds.y, img.y))
-    const w = x2 - x1
-    const h = y2 - y1
-    if (w >= MIN_CROP && h >= MIN_CROP) {
-      const s = scaleRef.current
-      const o = offsetRef.current
-      const sx = Math.round(x1) * s + o.x
-      const sy = Math.round(y1) * s + o.y
-      const sw = Math.round(w) * s
-      const sh = Math.round(h) * s
+    if (isDragOverRef.current) return
+    if (rafRef.current !== null) return
 
-      updateOverlay(sx, sy, sw, sh)
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null
+      const pos = stageRef.current?.getPointerPosition()
+      if (!pos) return
+      const img = stageToImage(pos.x, pos.y)
+      const ds = drawStartRef.current
+      const x1 = Math.max(0, Math.min(ds.x, img.x))
+      const y1 = Math.max(0, Math.min(ds.y, img.y))
+      const x2 = Math.min(imageSize.width, Math.max(ds.x, img.x))
+      const y2 = Math.min(imageSize.height, Math.max(ds.y, img.y))
+      const w = x2 - x1
+      const h = y2 - y1
+      if (w >= MIN_CROP && h >= MIN_CROP) {
+        const s = scaleRef.current
+        const o = offsetRef.current
+        const sx = Math.round(x1) * s + o.x
+        const sy = Math.round(y1) * s + o.y
+        const sw = Math.round(w) * s
+        const sh = Math.round(h) * s
 
-      if (rectRef.current) {
-        rectRef.current.setAttrs({ x: sx, y: sy, width: sw, height: sh })
+        updateOverlay(sx, sy, sw, sh)
+
+        if (rectRef.current) {
+          rectRef.current.setAttrs({ x: sx, y: sy, width: sw, height: sh })
+        }
+
+        showCropUI()
+        const layer = rectRef.current?.getLayer()
+        if (layer) layer.batchDraw()
       }
-
-      showCropUI()
-      const layer = rectRef.current?.getLayer()
-      if (layer) layer.batchDraw()
-    }
+    })
   }, [image, stageToImage, imageSize, updateOverlay, showCropUI])
 
   const handleMouseUp = useCallback(() => {
     if (!isDrawingRef.current) return
     isDrawingRef.current = false
 
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+
     if (rectRef.current && rectRef.current.visible()) {
+      const tr = transformerRef.current
+      if (tr) {
+        tr.enabledAnchors(CROP_ANCHORS as never[])
+        tr.borderEnabled(true)
+      }
+
       const s = scaleRef.current
       const o = offsetRef.current
       const node = rectRef.current
@@ -255,20 +349,30 @@ export function CropCanvas({ imagePath, onCropChange, onFileDrop, cropRect }: Cr
     onCropChangeRef.current(r)
   }, [imageSize])
 
+  // ─── RAF cleanup on unmount ───
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+    }
+  }, [])
+
   const stageCrop = cropRect ? {
     x: cropRect.x * scale + offsetX,
     y: cropRect.y * scale + offsetY,
   } : null
 
   return (
-    <div ref={containerRef} className="flex-1 bg-muted/30 m-3 rounded-xl overflow-hidden border-2 border-dashed border-muted-foreground/25">
+    <div ref={containerRef} className={`flex-1 bg-muted/30 m-3 rounded-xl overflow-hidden border-2 border-dashed transition-colors ${
+      isDragOver ? "border-primary border-solid bg-primary/5" : "border-muted-foreground/25"
+    }`}>
       {imagePath && image ? (
         <Stage ref={stageRef} width={stageSize.width} height={stageSize.height}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}>
-          <Layer>
+          <Layer listening={false}>
             <KonvaImage image={image} x={offsetX} y={offsetY}
               width={imageSize.width * scale} height={imageSize.height * scale} />
-
+          </Layer>
+          <Layer>
             <Group ref={overlayRef} visible={false}>
               <Rect fill={OVERLAY_COLOR} />
               <Rect fill={OVERLAY_COLOR} />
@@ -283,12 +387,11 @@ export function CropCanvas({ imagePath, onCropChange, onFileDrop, cropRect }: Cr
               draggable onDragEnd={handleDragEnd} onTransformEnd={handleTransformEnd} />
 
             <Transformer ref={transformerRef}
-              boundBoxFunc={(oldBox, newBox) =>
-                (newBox.width < MIN_CROP || newBox.height < MIN_CROP) ? oldBox : newBox}
+              boundBoxFunc={boundBoxFn}
               borderStroke={STROKE_COLOR} borderStrokeWidth={1}
               anchorFill="#ffffff" anchorStroke={STROKE_COLOR}
               anchorSize={8} anchorCornerRadius={2}
-              enabledAnchors={["top-left","top-center","top-right","middle-left","middle-right","bottom-left","bottom-center","bottom-right"]}
+              enabledAnchors={CROP_ANCHORS as never[]}
               rotateEnabled={false} keepRatio={false} />
           </Layer>
         </Stage>
@@ -308,3 +411,5 @@ export function CropCanvas({ imagePath, onCropChange, onFileDrop, cropRect }: Cr
     </div>
   )
 }
+
+export const CropCanvas = React.memo(CropCanvasInner)

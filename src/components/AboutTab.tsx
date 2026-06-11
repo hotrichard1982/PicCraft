@@ -70,7 +70,11 @@ export function AboutTab() {
             ].map(([label, value]) => (
               <div key={label} className="flex justify-between">
                 <span className="text-muted-foreground">{label}</span>
-                <span>{value}</span>
+                {value.startsWith("http") ? (
+                  <a href={value} target="_blank" rel="noreferrer" className="text-primary hover:underline">{value}</a>
+                ) : (
+                  <span>{value}</span>
+                )}
               </div>
             ))}
           </div>
