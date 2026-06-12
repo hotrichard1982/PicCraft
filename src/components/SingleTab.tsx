@@ -295,12 +295,12 @@ export function SingleTab() {
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <Label className="text-xs w-8">宽度</Label>
-                <Input value={width} onChange={(e) => handleWidthChange(e.target.value)} className="h-8 text-xs" disabled={!hasImage} />
+                <Input type="number" min="1" value={width} onChange={(e) => handleWidthChange(e.target.value)} className="h-8 text-xs" disabled={!hasImage} />
                 <span className="text-xs text-muted-foreground">px</span>
               </div>
               <div className="flex items-center gap-2">
                 <Label className="text-xs w-8">高度</Label>
-                <Input value={height} onChange={(e) => handleHeightChange(e.target.value)} className="h-8 text-xs" disabled={!hasImage} />
+                <Input type="number" min="1" value={height} onChange={(e) => handleHeightChange(e.target.value)} className="h-8 text-xs" disabled={!hasImage} />
                 <span className="text-xs text-muted-foreground">px</span>
               </div>
             </div>
@@ -312,7 +312,7 @@ export function SingleTab() {
 
             <div className="flex items-center gap-2">
               <Label className="text-xs w-8">质量</Label>
-              <Input value={quality} onChange={(e) => setQuality(e.target.value)} className="h-8 text-xs w-16" disabled={!hasImage} />
+              <Input type="number" min="1" max="100" value={quality} onChange={(e) => setQuality(e.target.value)} className="h-8 text-xs w-16" disabled={!hasImage} />
               <span className="text-xs text-muted-foreground">1-100</span>
             </div>
 

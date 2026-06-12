@@ -18,20 +18,21 @@ const sdkUcrtInc = "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.261
 const msvcInc = "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include"
 const rcExe = "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64\\rc.exe"
 
-if (!existsSync(msvcBin)) {
-  console.error(`❌ MSVC 工具链未找到: ${msvcBin}`)
-  console.error("   请安装 Visual Studio Build Tools 或更新脚本中的路径版本号")
-  process.exit(1)
+const hasMsvc = existsSync(msvcBin)
+if (!hasMsvc) {
+  console.warn("⚠️  MSVC 工具链未找到，回退到系统 PATH")
+  console.warn(`   期望路径: ${msvcBin}`)
+  console.warn("   将使用当前 PATH 中的编译器，如构建失败请安装 Visual Studio Build Tools")
 }
 
-const env = {
+const env = hasMsvc ? {
   ...process.env,
   PATH: `${msvcBin};${sdkBin};${process.env.PATH}`,
   LIB: `${msvcLib};${sdkLib};${sdkUcrtLib}`,
   INCLUDE: `${msvcInc};${sdkInc};${sdkUcrtInc}`,
   RC: rcExe,
   RC_x86_64_pc_windows_msvc: rcExe,
-}
+} : process.env
 
 console.log("🔨 Building PicCraft...")
 execSync("npx tauri build", { cwd: root, env, stdio: "inherit" })

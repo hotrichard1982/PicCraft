@@ -20,6 +20,7 @@ src-tauri/target/
 
 # Code analysis output
 graphify-out/
+.codegraph/
 
 # Editor directories and files
 .vscode/*

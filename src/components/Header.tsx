@@ -17,7 +17,7 @@ export function Header() {
 
       {/* Right: Version + Theme + Links */}
       <div className="flex items-center gap-4 text-sm text-muted-foreground">
-        <span className="text-xs">v2026.05</span>
+        <span className="text-xs">v2026.06</span>
 
         <Button
           variant="ghost"
@@ -32,7 +32,7 @@ export function Header() {
         <a
           href="https://www.cq30.com/"
           target="_blank"
-          rel="noreferrer"
+          rel="noopener noreferrer"
           className="text-xs hover:text-foreground transition-colors"
         >
           官网
@@ -41,7 +41,7 @@ export function Header() {
         <a
           href="https://github.com/hotrichard1982/PicCraft"
           target="_blank"
-          rel="noreferrer"
+          rel="noopener noreferrer"
           className="text-xs hover:text-foreground transition-colors"
         >
           GitHub

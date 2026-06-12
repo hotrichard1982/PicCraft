@@ -24,6 +24,7 @@ export function BatchTab() {
   const [progress, setProgress] = useState<BatchProgress>({ current: 0, total: 0, filename: "", error: null })
   const [statusText, setStatusText] = useState("准备就绪")
   const [errors, setErrors] = useState<string[]>([])
+  const [listenFailed, setListenFailed] = useState(false)
 
   const selectInput = useCallback(async () => {
     const d = await open({ directory: true })
@@ -42,6 +43,7 @@ export function BatchTab() {
     }
     setProcessing(true)
     setErrors([])
+    setListenFailed(false)
     setStatusText("正在处理...")
     let unlisten: UnlistenFn | undefined
     try {
@@ -53,7 +55,7 @@ export function BatchTab() {
         setStatusText(`处理中... ${event.payload.current}/${event.payload.total}`)
       })
     } catch (listenErr) {
-      setStatusText(`进度监听注册失败，处理仍将继续`)
+      setListenFailed(true)
       console.error("batch-progress listen error:", listenErr)
     }
     try {
@@ -95,12 +97,12 @@ export function BatchTab() {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <Label className="text-xs">目标宽度</Label>
-              <Input value={targetWidth} onChange={(e) => setTargetWidth(e.target.value)} className="h-8 text-xs w-20" disabled={processing} />
+              <Input type="number" min="1" value={targetWidth} onChange={(e) => setTargetWidth(e.target.value)} className="h-8 text-xs w-20" disabled={processing} />
               <span className="text-xs text-muted-foreground">px</span>
             </div>
             <div className="flex items-center gap-2">
               <Label className="text-xs">压缩质量</Label>
-              <Input value={quality} onChange={(e) => setQuality(e.target.value)} className="h-8 text-xs w-16" disabled={processing} />
+              <Input type="number" min="1" max="100" value={quality} onChange={(e) => setQuality(e.target.value)} className="h-8 text-xs w-16" disabled={processing} />
               <span className="text-xs text-muted-foreground">1-100</span>
             </div>
           </div>
@@ -118,6 +120,9 @@ export function BatchTab() {
               </div>
               <p className="text-xs text-muted-foreground text-center">{statusText}</p>
             </div>
+          )}
+          {listenFailed && processing && (
+            <p className="text-xs text-center text-amber-600 dark:text-amber-400">进度监听不可用，处理仍在后台进行</p>
           )}
           {!processing && <p className="text-xs text-muted-foreground text-center">{statusText}</p>}
           {errors.length > 0 && (

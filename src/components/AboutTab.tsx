@@ -10,7 +10,7 @@ export function AboutTab() {
       {/* Title */}
       <div className="text-center">
         <h2 className="text-2xl font-bold">图轻剪 PicCraft</h2>
-        <p className="text-sm text-muted-foreground mt-1">v2026.05</p>
+        <p className="text-sm text-muted-foreground mt-1">v2026.06</p>
       </div>
 
       <Separator />
@@ -48,7 +48,7 @@ export function AboutTab() {
             <a
               href="https://github.com/hotrichard1982/PicCraft"
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="text-sm text-primary hover:underline"
             >
               ⭐ GitHub 求Star

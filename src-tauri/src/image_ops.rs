@@ -2,13 +2,15 @@ use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use image::DynamicImage;
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
 
 /// 支持的图片扩展名
 pub const IMG_EXTS: [&str; 5] = ["jpg", "jpeg", "png", "webp", "bmp"];
+
+/// 图片文件最大大小 (200 MB)
+const MAX_FILE_SIZE: u64 = 200 * 1024 * 1024;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BatchProgress {
@@ -76,6 +78,8 @@ pub fn resize_image(
         return Err("目标宽度和高度必须大于 0".to_string());
     }
 
+    check_file_size(&path)?;
+
     let img = image::open(&path).map_err(|e| format!("无法打开图片: {e}"))?;
 
     let resized = img.resize_exact(target_width, target_height, FilterType::Lanczos3);
@@ -103,11 +107,13 @@ pub fn crop_image(
         return Err("裁剪宽度和高度必须大于 0".to_string());
     }
 
+    check_file_size(&path)?;
+
     let mut img = image::open(&path).map_err(|e| format!("无法打开图片: {e}"))?;
 
     let (img_w, img_h) = (img.width(), img.height());
-    if x >= img_w || y >= img_h {
-        return Err("裁剪起点超出图片范围".to_string());
+    if x >= img_w || y >= img_h || x + width > img_w || y + height > img_h {
+        return Err("裁剪区域超出图片范围".to_string());
     }
 
     let cropped = img.crop(x, y, width, height);
@@ -130,6 +136,8 @@ pub fn save_image(
     format: String,
     quality: u8,
 ) -> Result<SaveResult, String> {
+    check_file_size(&temp_path)?;
+
     let img = image::open(&temp_path).map_err(|e| format!("无法读取临时文件: {e}"))?;
 
     let save_path = Path::new(&save_path);
@@ -289,8 +297,14 @@ fn process_single_batch(
     if target_width == 0 {
         return Err("目标宽度必须大于 0".to_string());
     }
+
+    check_file_size_path(input)?;
+
     let img = image::open(input).map_err(|e| format!("无法打开: {e}"))?;
     let (w, h) = (img.width(), img.height());
+    if w == 0 {
+        return Err("图片宽度为 0，无法处理".to_string());
+    }
     let th = (h as f64 * (target_width as f64 / w as f64)) as u32;
     let resized = img.resize_exact(target_width, th.max(1), FilterType::Lanczos3);
 
@@ -328,12 +342,30 @@ fn temp_file_path(original: &str, suffix: &str) -> Result<PathBuf, String> {
         .file_stem()
         .unwrap_or_default()
         .to_string_lossy();
-    let mut hasher = DefaultHasher::new();
-    original.hash(&mut hasher);
-    let hash = format!("{:08x}", hasher.finish());
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("系统时间错误: {e}"))?
+        .as_nanos();
     let dir = std::env::temp_dir();
-    let filename = format!("piccraft_{stem}_{hash}_{suffix}.png");
+    let filename = format!("piccraft_{stem}_{ts}_{suffix}.png");
     Ok(dir.join(filename))
+}
+
+fn check_file_size(path: &str) -> Result<(), String> {
+    check_file_size_path(Path::new(path))
+}
+
+fn check_file_size_path(path: &Path) -> Result<(), String> {
+    let metadata = std::fs::metadata(path)
+        .map_err(|e| format!("读取文件信息失败: {e}"))?;
+    if metadata.len() > MAX_FILE_SIZE {
+        return Err(format!(
+            "文件过大 ({} MB)，单文件上限 {} MB",
+            metadata.len() / (1024 * 1024),
+            MAX_FILE_SIZE / (1024 * 1024)
+        ));
+    }
+    Ok(())
 }
 
 fn save_to_temp(img: &DynamicImage, path: &PathBuf) -> Result<(), String> {

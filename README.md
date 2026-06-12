@@ -2,7 +2,7 @@
 
 模块化桌面图片处理工具 — 批量/单张图片压缩、缩放、裁剪。
 
-**Rust + Tauri v2 · React 19 · TypeScript · Tailwind CSS · Konva.js · 明暗双主题**
+**v0.1.0 (2026.06)** · Rust + Tauri v2 · React 19 · TypeScript · Tailwind CSS · Konva.js · 明暗双主题
 
 **重庆三人众科技有限公司** | QQ: 7602069 | 邮箱: 7602069@qq.com | [官网](https://www.cq30.com/)
 
@@ -15,7 +15,8 @@
 - **裁剪**：鼠标拖拽选区 + 8 个可拖动手柄 + 数值输入，ESC 取消，RAF 节流优化
 - **拖拽加载**：直接从文件管理器拖拽图片到预览区，支持悬停视觉反馈
 - **实时预览**：Konva Canvas 渲染，半透明裁剪遮罩，图片加载失败有错误日志
-- **另存为**（Ctrl+Shift+S）/ **覆盖原图**（Ctrl+S），支持 JPG/PNG（调色板量化）/WebP/BMP
+- **文件保护**：自动拒绝超过 200MB 的超大图片，防止内存溢出
+- **另存为**（Ctrl+Shift+S）/ **覆盖原图**（Ctrl+S），支持 JPG / PNG（调色板量化）/ WebP / BMP
 
 ### 批量处理
 - 按目标宽度等比缩放文件夹内所有图片
@@ -46,6 +47,12 @@ npm run tauri dev
 
 ```bash
 npm run tauri build
+```
+
+Windows 环境下如 MSVC 工具链不在 PATH 中，可通过 copy-dist 脚本辅助构建：
+
+```bash
+npm run tauri:build
 ```
 
 输出：
@@ -87,6 +94,7 @@ PicCraft/
 │       ├── lib.rs              # Tauri Builder + 插件注册
 │       └── image_ops.rs        # 图片处理命令
 ├── public/logo.png             # App Logo
+├── scripts/copy-dist.mjs       # Windows 构建辅助脚本
 ├── AGENTS.md                   # AI 开发助手指南
 └── docs/plans/                 # 设计文档
 ```
