@@ -253,7 +253,15 @@ export function SingleTab() {
     <div className="flex h-full">
       {/* Canvas */}
       <CropCanvas imagePath={displayPath} cropRect={cropRect}
-        onCropChange={setCropRect} onFileDrop={loadImage} />
+        onCropChange={setCropRect} onFileDrop={loadImage}
+        onTransformed={(r) => {
+          setDisplayPath(r.temp_path)
+          setTempPath(r.temp_path)
+          setWidth(String(r.width))
+          setHeight(String(r.height))
+          setCropRect(null)
+        }}
+        onStatus={setStatusText} />
 
       {/* Right Panel */}
       <div className="w-72 border-l flex flex-col min-h-0">

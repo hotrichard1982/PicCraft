@@ -1,5 +1,5 @@
 use image::codecs::jpeg::JpegEncoder;
-use image::imageops::FilterType;
+use image::imageops::{FilterType, flip_horizontal, flip_vertical, rotate90, rotate270};
 use image::DynamicImage;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -125,6 +125,31 @@ pub fn crop_image(
         temp_path: temp_path.to_string_lossy().to_string(),
         width: cropped.width(),
         height: cropped.height(),
+    })
+}
+
+/// 变换图片（水平翻转 / 垂直翻转 / 顺时针 90° / 逆时针 90°）
+#[tauri::command]
+pub fn transform_image(path: String, mode: String) -> Result<ImageResult, String> {
+    check_file_size(&path)?;
+
+    let img = image::open(&path).map_err(|e| format!("无法打开图片: {e}"))?;
+
+    let transformed = match mode.as_str() {
+        "flip-h" => DynamicImage::ImageRgba8(flip_horizontal(&img.to_rgba8())),
+        "flip-v" => DynamicImage::ImageRgba8(flip_vertical(&img.to_rgba8())),
+        "rot-cw" => DynamicImage::ImageRgba8(rotate90(&img.to_rgba8())),
+        "rot-ccw" => DynamicImage::ImageRgba8(rotate270(&img.to_rgba8())),
+        other => return Err(format!("不支持的变换: {other}")),
+    };
+
+    let temp_path = temp_file_path(&path, "transformed")?;
+    save_to_temp(&transformed, &temp_path)?;
+
+    Ok(ImageResult {
+        temp_path: temp_path.to_string_lossy().to_string(),
+        width: transformed.width(),
+        height: transformed.height(),
     })
 }
 

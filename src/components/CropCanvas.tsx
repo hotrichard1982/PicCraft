@@ -2,6 +2,8 @@ import React, { useRef, useState, useEffect, useCallback } from "react"
 import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group } from "react-konva"
 import { convertFileSrc } from "@tauri-apps/api/core"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
+import { invoke } from "@tauri-apps/api/core"
+import { FlipHorizontal, FlipVertical, RotateCw, RotateCcw, Loader2 } from "lucide-react"
 import type Konva from "konva"
 
 export interface CropRect {
@@ -16,6 +18,8 @@ interface CropCanvasProps {
   onCropChange: (rect: CropRect | null) => void
   onFileDrop: (path: string) => void
   cropRect: CropRect | null
+  onTransformed?: (result: { temp_path: string; width: number; height: number }) => void
+  onStatus?: (msg: string) => void
 }
 
 const IMG_EXTS = ["jpg", "jpeg", "png", "webp", "bmp"]
@@ -28,7 +32,7 @@ const CROP_ANCHORS: string[] = ["top-left", "top-center", "top-right", "middle-l
 const boundBoxFn = (oldBox: { x: number; y: number; width: number; height: number; rotation: number }, newBox: { x: number; y: number; width: number; height: number; rotation: number }) =>
   (newBox.width < MIN_CROP || newBox.height < MIN_CROP) ? oldBox : newBox
 
-function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect }: CropCanvasProps) {
+function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTransformed, onStatus }: CropCanvasProps) {
   const stageRef = useRef<Konva.Stage>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
   const rectRef = useRef<Konva.Rect>(null)
@@ -39,6 +43,8 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect }: Crop
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 })
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 })
   const [isDragOver, setIsDragOver] = useState(false)
+  const [toolbarVisible, setToolbarVisible] = useState(false)
+  const [transforming, setTransforming] = useState(false)
 
   const isDrawingRef = useRef(false)
   const isShowingRef = useRef(false)
@@ -84,6 +90,30 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect }: Crop
       if (unlistenFn) unlistenFn()
     }
   }, [])
+
+  // ─── Transform: flip / rotate ───
+  const handleTransform = useCallback(async (mode: "flip-h" | "flip-v" | "rot-cw" | "rot-ccw") => {
+    const source = imagePath
+    if (!source || transforming) return
+    setTransforming(true)
+    try {
+      const result = await invoke<{ temp_path: string; width: number; height: number }>(
+        "transform_image",
+        { path: source, mode },
+      )
+      onTransformed?.(result)
+      onStatus?.(
+        mode === "flip-h" ? "已水平翻转"
+        : mode === "flip-v" ? "已垂直翻转"
+        : mode === "rot-cw" ? "已顺时针旋转 90°"
+        : "已逆时针旋转 90°"
+      )
+    } catch (e) {
+      onStatus?.(`变换失败：${e}`)
+    } finally {
+      setTransforming(false)
+    }
+  }, [imagePath, transforming, onTransformed, onStatus])
 
   // ─── Container Resize ───
   useEffect(() => {
@@ -361,10 +391,54 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect }: Crop
     y: cropRect.y * scale + offsetY,
   } : null
 
+  const toolbarButtons = [
+    { mode: "flip-h" as const, label: "水平翻转", icon: FlipHorizontal },
+    { mode: "flip-v" as const, label: "垂直翻转", icon: FlipVertical },
+    { mode: "rot-ccw" as const, label: "逆时针 90°", icon: RotateCcw },
+    { mode: "rot-cw" as const, label: "顺时针 90°", icon: RotateCw },
+  ]
+
   return (
-    <div ref={containerRef} className={`flex-1 bg-muted/30 m-3 rounded-xl overflow-hidden border-2 border-dashed transition-colors ${
-      isDragOver ? "border-primary border-solid bg-primary/5" : "border-muted-foreground/25"
-    }`}>
+    <div
+      ref={containerRef}
+      onMouseEnter={() => setToolbarVisible(true)}
+      onMouseLeave={() => setToolbarVisible(false)}
+      className={`relative flex-1 bg-muted/30 m-3 rounded-xl overflow-hidden border-2 border-dashed transition-colors ${
+        isDragOver ? "border-primary border-solid bg-primary/5" : "border-muted-foreground/25"
+      }`}
+    >
+      {/* Floating transform toolbar */}
+      {imagePath && image && (
+        <div
+          className={`absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 p-1 rounded-lg bg-card/95 border shadow-lg backdrop-blur-sm transition-all duration-200 ${
+            toolbarVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2 pointer-events-none"
+          }`}
+        >
+          {transforming ? (
+            <div className="px-3 py-1.5 flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" />
+              处理中...
+            </div>
+          ) : (
+            toolbarButtons.map(({ mode, label, icon: Icon }) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => handleTransform(mode)}
+                className="group relative p-2 rounded-md hover:bg-accent transition-colors disabled:opacity-50"
+                disabled={transforming}
+                aria-label={label}
+              >
+                <Icon className="size-4" />
+                <span className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 px-2 py-0.5 text-[10px] whitespace-nowrap rounded bg-foreground text-background opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                  {label}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
       {imagePath && image ? (
         <Stage ref={stageRef} width={stageSize.width} height={stageSize.height}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}>

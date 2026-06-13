@@ -1,6 +1,6 @@
 mod image_ops;
 
-use image_ops::{get_image_info, resize_image, crop_image, save_image, batch_process};
+use image_ops::{get_image_info, resize_image, crop_image, transform_image, save_image, batch_process};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -14,12 +14,14 @@ pub fn run() {
                 )?;
             }
             app.handle().plugin(tauri_plugin_dialog::init())?;
+            app.handle().plugin(tauri_plugin_opener::init())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_image_info,
             resize_image,
             crop_image,
+            transform_image,
             save_image,
             batch_process,
         ])

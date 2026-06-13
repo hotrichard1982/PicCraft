@@ -1,6 +1,7 @@
 import { Sun, Moon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useTheme } from "@/hooks/use-theme"
+import { openUrl } from "@tauri-apps/plugin-opener"
 
 export function Header() {
   const { theme, toggleTheme } = useTheme()
@@ -31,18 +32,16 @@ export function Header() {
 
         <a
           href="https://www.cq30.com/"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs hover:text-foreground transition-colors"
+          onClick={(e) => { e.preventDefault(); openUrl("https://www.cq30.com/") }}
+          className="text-xs hover:text-foreground transition-colors cursor-pointer"
         >
           官网
         </a>
 
         <a
           href="https://github.com/hotrichard1982/PicCraft"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs hover:text-foreground transition-colors"
+          onClick={(e) => { e.preventDefault(); openUrl("https://github.com/hotrichard1982/PicCraft") }}
+          className="text-xs hover:text-foreground transition-colors cursor-pointer"
         >
           GitHub
         </a>

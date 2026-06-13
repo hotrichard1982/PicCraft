@@ -1,5 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
+import { openUrl } from "@tauri-apps/plugin-opener"
 
 export function AboutTab() {
   return (
@@ -47,9 +48,8 @@ export function AboutTab() {
           <div className="flex justify-center mt-3">
             <a
               href="https://github.com/hotrichard1982/PicCraft"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-primary hover:underline"
+              onClick={(e) => { e.preventDefault(); openUrl("https://github.com/hotrichard1982/PicCraft") }}
+              className="text-sm text-primary hover:underline cursor-pointer"
             >
               ⭐ GitHub 求Star
             </a>
@@ -71,7 +71,9 @@ export function AboutTab() {
               <div key={label} className="flex justify-between">
                 <span className="text-muted-foreground">{label}</span>
                 {value.startsWith("http") ? (
-                  <a href={value} target="_blank" rel="noreferrer" className="text-primary hover:underline">{value}</a>
+                  <a href={value}
+                    onClick={(e) => { e.preventDefault(); openUrl(value) }}
+                    className="text-primary hover:underline cursor-pointer">{value}</a>
                 ) : (
                   <span>{value}</span>
                 )}
