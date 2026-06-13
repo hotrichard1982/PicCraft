@@ -32,3 +32,4 @@ graphify-out/
 *.njsproj
 *.sln
 *.sw?
+release-assets/
