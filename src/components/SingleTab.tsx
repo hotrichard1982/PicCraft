@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { CropCanvas, type CropRect } from "@/components/CropCanvas"
-import { FolderOpen, RotateCcw, Save, Download } from "lucide-react"
+import { useAppStore } from "@/store"
+import { FolderOpen, RotateCcw, Save, Download, ListPlus } from "lucide-react"
 
 interface ImageInfo {
   path: string
@@ -45,6 +46,12 @@ export function SingleTab() {
   const [hasImage, setHasImage] = useState(false)
   const [statusText, setStatusText] = useState("")
   const [isPng, setIsPng] = useState(false)
+
+  // ─── Store (editingFile 来自外部入口；currentFolder 用于找下一张) ───
+  const editingFile = useAppStore((s) => s.editingFile)
+  const setEditingFile = useAppStore((s) => s.setEditingFile)
+  const enqueue = useAppStore((s) => s.enqueue)
+  const currentFolder = useAppStore((s) => s.currentFolder)
 
   // ─── Load Image ───
   const loadImage = useCallback(async (path: string) => {
@@ -234,6 +241,40 @@ export function SingleTab() {
     }
   }, [filePath, imageInfo])
 
+  // ─── Enqueue & Open Next ───
+  const handleEnqueueAndNext = useCallback(async () => {
+    if (!filePath) return
+    enqueue([filePath])
+
+    if (!currentFolder) {
+      setStatusText("已加入队列（无可用目录，无法打开下一张）")
+      return
+    }
+
+    try {
+      const entries = await invoke<ImageInfo[]>("read_dir", { folder: currentFolder })
+      const idx = entries.findIndex((e) => e.path === filePath)
+      const next = idx >= 0 ? entries[idx + 1] : entries[0]
+      if (!next) {
+        setStatusText("已加入队列（已是当前目录最后一张）")
+        return
+      }
+      await loadImage(next.path)
+      setStatusText(`已加入队列，打开下一张：${next.path.split(/[/\\]/).pop()}`)
+    } catch (e) {
+      setStatusText(`已加入队列（读目录失败：${e}）`)
+    }
+  }, [filePath, currentFolder, enqueue, loadImage])
+
+  // ─── Consume editingFile on mount / when set externally ───
+  useEffect(() => {
+    if (editingFile && !filePath) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void loadImage(editingFile)
+      setEditingFile(null)
+    }
+  }, [editingFile, filePath, loadImage, setEditingFile])
+
   // ─── Keyboard Shortcuts ───
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -367,6 +408,9 @@ export function SingleTab() {
             </div>
             <Button size="sm" variant="outline" className="w-full" disabled={!hasImage} onClick={handleSaveAs}>
               <Download className="size-3 mr-1" />另存为
+            </Button>
+            <Button size="sm" variant="outline" className="w-full" disabled={!hasImage} onClick={handleEnqueueAndNext}>
+              <ListPlus className="size-3 mr-1" />加入队列并打开下一张
             </Button>
             <p className="text-[10px] text-muted-foreground text-right">Ctrl+S 覆盖原图 | Ctrl+Shift+S 另存为</p>
           </div>

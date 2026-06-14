@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' https://asset.localhost; img-src 'self' https://asset.localhost data:; connect-src 'self' https://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'",
+      "csp": "default-src 'self' asset: http://asset.localhost https://asset.localhost; img-src 'self' asset: http://asset.localhost https://asset.localhost data:; connect-src 'self' asset: http://asset.localhost https://asset.localhost ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'",
       "assetProtocol": {
         "enable": true,
         "scope": ["**"]

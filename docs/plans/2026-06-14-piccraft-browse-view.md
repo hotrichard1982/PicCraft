@@ -40,20 +40,32 @@
 ### M1 · Rust 后端扩展 + 前端基础设施（地基）
 
 **交付：**
+- 新增 Rust 依赖：
+  - `tauri-plugin-single-instance = "2"`（**必装**：避免双击 2 张图开 2 个进程）
+  - `base64 = "0.22"`（缩略图编码）
+  - `winreg = "0.52"`（M6 用，M1 阶段先装好）
 - Rust 新增命令：
   - `read_dir(folder: String) -> Vec<ImageInfo>` —— 扫描目录、过滤 `IMG_EXTS`、读元数据
   - `make_thumbnail(path: String, max_width: u32) -> String` —— 返回 base64 PNG
   - `get_file_meta(path: String) -> FileMeta` —— 单独取大小/创建/修改日期
+  - `get_startup_args() -> StartupArgs` —— 返回结构化启动参数（基于 [ADR-0001](../adr/0001-launch-routing.md)）
 - 扩展 `ImageInfo` 结构：加 `created_at: Option<u64>`、`modified_at: Option<u64>`（Unix 时间戳秒）
+- 启动参数解析：在 `lib.rs` 启动时调 `parse_startup_args()`，注入 `tauri::State`
+- `tauri-plugin-single-instance` 初始化：第二次启动时把 args 转发给已运行实例
 - 前端：
   - 装 `zustand`、`@tauri-apps/plugin-store`
   - 建 `src/store/index.ts` —— 4 个 slice：`view` / `folder` / `queue` / `settings`
   - 持久化插件：启动时 hydrate `lastFolder` 和 `settings.fileAssoc`
-- 入口 `App.tsx` 加 `useEffect` 读启动参数（`@tauri-apps/api/path` + `window.__TAURI__.cli`）
+  - 启动 hook：`App.tsx` 启动时 `invoke("get_startup_args")` → dispatch 到 store → 根据 `mode` 切到初始视图
+- dev 模式测试方法写进 README：`pnpm tauri dev -- "C:\path\to\img.jpg"` 模拟 args
 
-**验证：** `cargo build` 干净通过；前端能通过 invoke 调通 3 个新命令。
+**验证：**
+- `cargo build` 干净通过
+- `npm run build` 通过
+- dev 模式 4 种启动方式都能正确路由
+- 启动 2 次 → 只有 1 个 PicCraft 进程
 
-**风险：** 启动参数读取在 Tauri 2 里的 API 路径得查清楚。
+**风险：** 启动参数读取在 Tauri 2 里的 API 路径已通过预研报告确认（见 [ADR-0001 §必装依赖](../adr/0001-launch-routing.md)）。
 
 ### M2 · 浏览视图骨架
 
@@ -115,13 +127,20 @@
 - **设置子 Tab**：
   - 5 个 checkbox（jpg/jpeg/png/webp/bmp）—— `tauri-plugin-store` 持久化
   - 每次勾选变化 → 调 Rust 命令 `register_file_assoc(formats: Vec<String>)` 同步 Windows 注册表
-  - Rust 端用 `winreg` crate 操作 `HKCU\Software\Classes\<ext>` 下的 OpenWithProgids
+  - Rust 端用 `winreg` crate 操作 **2 处注册表**（依据 [ADR-0001 §实施细节](../adr/0001-launch-routing.md)）：
+    - `HKCU\Software\Classes\SystemFileAssociations\image\shell\open\command` —— 双击 = 浏览
+    - `HKCU\Software\Classes\SystemFileAssociations\image\shell\edit\command` --edit —— 右键"用图轻剪编辑" = 单图
+  - 写注册表时**先读后合并写**，不删用户已有的其他应用关联
+  - 写入路径要 quote：`"<piccarft.exe 绝对路径>" "%1"`
 - **帮助子 Tab**：
-  - 静态 HTML 3-4 段：① 如何浏览图片 ② 如何加入队列 ③ 如何编辑 / 批量 ④ 双击图片关联
+  - 静态 HTML 3-4 段：① 如何浏览图片 ② 如何加入队列 ③ 如何编辑 / 批量 ④ 双击图片关联（必须包含"双击默认进入浏览，右键"用图轻剪编辑"进入编辑"的解释）
 - **关于子 Tab**：
   - 现 AboutTab 内容迁移过来（Logo / 标题 / 版本 / 技术栈 / 开源 / 公司 / 官网 / GitHub）
 
-**验证：** 勾选 jpg → 立即生效（用 `assoc` 或 `ftype` 命令查注册表能看到 PicCraft）。
+**验证：** 
+- 勾选 jpg → 立即生效（用 `reg query` 查注册表能看到两条 command）
+- 反勾选 → 注册表项被清掉
+- 重启系统后仍生效
 
 **风险：** Windows 注册表写错位置会污染系统——必须先**读**再**合并写**（不删用户已有的关联项），且所有操作加 `Result` 错误处理。
 

@@ -33,3 +33,6 @@ graphify-out/
 *.sln
 *.sw?
 release-assets/
+.qoderignore
+pnpm-workspace.yaml
+agent.md
