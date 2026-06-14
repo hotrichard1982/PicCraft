@@ -1,5 +1,5 @@
 use image::codecs::jpeg::JpegEncoder;
-use image::imageops::{FilterType, flip_horizontal, flip_vertical, rotate90, rotate270};
+use image::imageops::FilterType;
 use image::DynamicImage;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -136,10 +136,10 @@ pub fn transform_image(path: String, mode: String) -> Result<ImageResult, String
     let img = image::open(&path).map_err(|e| format!("无法打开图片: {e}"))?;
 
     let transformed = match mode.as_str() {
-        "flip-h" => DynamicImage::ImageRgba8(flip_horizontal(&img.to_rgba8())),
-        "flip-v" => DynamicImage::ImageRgba8(flip_vertical(&img.to_rgba8())),
-        "rot-cw" => DynamicImage::ImageRgba8(rotate90(&img.to_rgba8())),
-        "rot-ccw" => DynamicImage::ImageRgba8(rotate270(&img.to_rgba8())),
+        "flip-h" => img.fliph(),
+        "flip-v" => img.flipv(),
+        "rot-cw" => img.rotate90(),
+        "rot-ccw" => img.rotate270(),
         other => return Err(format!("不支持的变换: {other}")),
     };
 
