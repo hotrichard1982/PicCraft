@@ -50,6 +50,8 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
   // 缓存按 maxWidth 分组存储，避免 thumbSize 变化时清空
   const [thumbs, setThumbs] = useState<Record<string, string | "err">>({})
   const thumbCacheRef = useRef<Map<number, Record<string, string | "err">>>(new Map())
+  const cacheSizeRef = useRef(0)
+  const MAX_CACHE_SIZE = 300
   const observerRef = useRef<IntersectionObserver | null>(null)
   const loadingSetRef = useRef<Set<string>>(new Set())
   const currentMaxWidthRef = useRef<number>(thumbSize)
@@ -88,12 +90,23 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
                 const sub = thumbCacheRef.current.get(maxWidth) ?? {}
                 sub[path] = url
                 thumbCacheRef.current.set(maxWidth, sub)
+                cacheSizeRef.current++
+                // 缓存上限保护：超限时清空全部（切换目录时自动重建）
+                if (cacheSizeRef.current > MAX_CACHE_SIZE) {
+                  thumbCacheRef.current.clear()
+                  cacheSizeRef.current = 0
+                }
                 setThumbs((prev) => ({ ...prev, [path]: url }))
               })
               .catch(() => {
                 const sub = thumbCacheRef.current.get(maxWidth) ?? {}
                 sub[path] = "err"
                 thumbCacheRef.current.set(maxWidth, sub)
+                cacheSizeRef.current++
+                if (cacheSizeRef.current > MAX_CACHE_SIZE) {
+                  thumbCacheRef.current.clear()
+                  cacheSizeRef.current = 0
+                }
                 setThumbs((prev) => ({ ...prev, [path]: "err" }))
               })
               .finally(() => {
@@ -115,6 +128,7 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
   useEffect(() => {
     setThumbs({})
     thumbCacheRef.current.clear()
+    cacheSizeRef.current = 0
     loadingSetRef.current.clear()
     itemLayoutsRef.current.clear()
     containerRectRef.current = null

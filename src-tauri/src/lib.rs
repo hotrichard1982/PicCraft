@@ -133,9 +133,6 @@ pub fn run() {
 /// Tauri State 容器：Mutex 包一层让 single-instance 转发能 mutate
 pub struct StartupArgsInner(pub std::sync::Mutex<StartupArgs>);
 
-/// 前端读取启动参数（clone State 里的 StartupArgs 返回）
-/// 注意：此函数被 `image_ops::read_startup_args` 替代，避免 `#[tauri::command]` 同名宏冲突
-
 /// 从给定的 args 迭代器解析（single-instance 转发用，避免重复读 env）
 fn parse_from_iter<I, S>(mut iter: I) -> StartupArgs
 where

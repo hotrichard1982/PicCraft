@@ -52,6 +52,8 @@ export function BrowseView() {
   useEffect(() => {
     if (currentFolder) {
       void loadFolder(currentFolder)
+      // 切换目录时关闭全屏看图
+      setFullscreenIndex(null)
     } else {
       setEntries([])
     }

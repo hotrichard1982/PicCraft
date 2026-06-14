@@ -4,6 +4,7 @@ use image::imageops::FilterType;
 use image::DynamicImage;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
 
@@ -363,14 +364,18 @@ fn process_single_batch(
     Ok(())
 }
 
+/// 临时计数器 + 纳秒时间戳实现不可预测性
+static RNG_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 fn temp_file_path(original: &str, suffix: &str) -> Result<PathBuf, String> {
     let orig = Path::new(original);
     let stem = orig.file_stem().unwrap_or_default().to_string_lossy();
     let ts = SystemTime::now().duration_since(UNIX_EPOCH)
         .map_err(|e| format!("系统时间错误: {e}"))?
         .as_nanos();
+    let r = RNG_COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir();
-    let filename = format!("piccraft_{stem}_{ts}_{suffix}.png");
+    let filename = format!("piccraft_{stem}_{ts}_{r}_{suffix}.png");
     Ok(dir.join(filename))
 }
 
@@ -405,7 +410,10 @@ fn png_colors(quality: u8) -> u32 {
 /// 扫描目录顶层图片，按文件名升序排序，跳过子目录
 #[tauri::command]
 pub fn read_dir(folder: String) -> Result<Vec<ImageInfo>, String> {
-    let dir = Path::new(&folder);
+    // 规范化路径：防止 path traversal
+    let canonical = std::fs::canonicalize(&folder)
+        .map_err(|e| format!("无法解析路径: {e}"))?;
+    let dir = Path::new(&canonical);
     if !dir.is_dir() { return Err(format!("目录不存在或不是目录: {folder}")); }
     let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
         .map_err(|e| format!("读取目录失败: {e}"))?
