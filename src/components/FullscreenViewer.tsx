@@ -12,6 +12,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/store"
+import { formatSize } from "@/components/StatusBar"
 import type { DirEntry } from "@/views/BrowseView"
 
 interface FullscreenViewerProps {
@@ -121,6 +122,7 @@ export function FullscreenViewer({
     i.src = url
     return () => {
       cancelled = true
+      i.src = ""
     }
   }, [current])
 
@@ -229,17 +231,6 @@ export function FullscreenViewer({
       y: (view.stageSize.h - imgLoad.imgSize.h) / 2,
     })
   }, [imgLoad.img, imgLoad.imgSize, view.stageSize])
-
-  // ─── 滚轮缩放（Ctrl+滚轮 或 直接滚轮）───
-  useEffect(() => {
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault()
-      zoom(e.deltaY < 0 ? 0.1 : -0.1)
-    }
-    const el = containerRef.current
-    el?.addEventListener("wheel", onWheel, { passive: false })
-    return () => el?.removeEventListener("wheel", onWheel)
-  }, [zoom])
 
   // ─── 快捷键 ───
   useEffect(() => {
@@ -389,11 +380,4 @@ export function FullscreenViewer({
       )}
     </div>
   )
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
 }

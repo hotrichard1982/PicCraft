@@ -57,7 +57,7 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
   const currentMaxWidthRef = useRef<number>(thumbSize)
 
   // ─── Layout 缓存：用于 rubberHit 避免反复 getBoundingClientRect ───
-  const itemLayoutsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
+  const itemLayoutsRef = useRef<Map<string, { x: number; y: number; w: number; h: number }>>(new Map())
   const containerRectRef = useRef<{ left: number; top: number; scrollLeft: number; scrollTop: number } | null>(null)
 
   // ─────────────────────────────────────────────────────────
@@ -118,6 +118,13 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
       },
       { root: containerRef.current, rootMargin: "200px", threshold: 0.05 },
     )
+    // 补观察：首次渲染时 ref callback 先于 useEffect 执行，可能遗漏已挂载的元素
+    const container = containerRef.current
+    if (container) {
+      container.querySelectorAll<HTMLElement>("[data-path]").forEach((el) => {
+        observerRef.current?.observe(el)
+      })
+    }
     return () => {
       observerRef.current?.disconnect()
       observerRef.current = null
@@ -139,7 +146,7 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
     const old = itemLayoutsRef.current.get(path)
     if (old !== undefined) itemLayoutsRef.current.delete(path)
     if (el) {
-      itemLayoutsRef.current.set(path, { x: 0, y: 0 }) // 占位，layout 缓存见下方
+      itemLayoutsRef.current.set(path, { x: 0, y: 0, w: 0, h: 0 }) // 占位，layout 缓存见下方
       observerRef.current?.observe(el)
     }
   }, [])
@@ -171,6 +178,8 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
         itemLayoutsRef.current.set(path, {
           x: r.left - crRect.left + cr.scrollLeft,
           y: r.top - crRect.top + cr.scrollTop,
+          w: r.width,
+          h: r.height,
         })
       })
     }
@@ -248,14 +257,14 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
     for (const [path, layout] of itemLayoutsRef.current.entries()) {
       const elX1 = layout.x
       const elY1 = layout.y
-      const elX2 = layout.x + thumbSize
-      const elY2 = layout.y + thumbSize
+      const elX2 = layout.x + layout.w
+      const elY2 = layout.y + layout.h
       const overlapX = elX1 < rx2 && elX2 > rx1
       const overlapY = elY1 < ry2 && elY2 > ry1
       if (overlapX && overlapY) hit.add(path)
     }
     return hit
-  }, [rubber, thumbSize])
+  }, [rubber])
 
   // 框选命中时同步到 store（节流到 rubber 真实变化时）
   useEffect(() => {

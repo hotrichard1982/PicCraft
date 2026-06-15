@@ -48,12 +48,12 @@ function SettingsSubTab() {
               return (
                 <label
                   key={ext}
+                  onClick={() => toggle(ext, !checked)}
                   className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent cursor-pointer select-none"
                 >
                   <span
                     role="checkbox"
                     aria-checked={checked}
-                    onClick={() => toggle(ext, !checked)}
                     className={
                       "size-4 rounded border flex items-center justify-center transition-colors " +
                       (checked

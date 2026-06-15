@@ -1,8 +1,9 @@
 mod image_ops;
 
 use image_ops::{
-    batch_process, batch_process_queue, crop_image, get_file_meta, get_image_info, make_thumbnail,
-    read_dir, read_startup_args, register_file_assoc, resize_image, save_image, transform_image,
+    apply_transforms, batch_process, batch_process_queue, crop_image, get_file_meta,
+    get_image_info, make_thumbnail, read_dir, read_startup_args, register_file_assoc,
+    resize_image, save_image, transform_image,
 };
 use serde::Serialize;
 use std::path::Path;
@@ -112,6 +113,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            apply_transforms,
             get_image_info,
             resize_image,
             crop_image,

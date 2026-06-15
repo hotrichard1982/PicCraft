@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useReducer } from "react"
+import { useState, useCallback, useEffect, useReducer, useRef } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { open } from "@tauri-apps/plugin-dialog"
@@ -14,6 +14,8 @@ interface BatchProgress {
   current: number
   total: number
   filename: string
+  /** 完整文件路径，用于精确匹配队列项 */
+  path: string
   error: string | null
 }
 
@@ -36,7 +38,7 @@ type BatchRunAction =
 function batchRunReducer(state: BatchRunState, action: BatchRunAction): BatchRunState {
   switch (action.type) {
     case "start":
-      return { ...state, processing: true, errors: [], listenFailed: false, progress: { current: 0, total: 0, filename: "", error: null } }
+      return { ...state, processing: true, errors: [], listenFailed: false, progress: { current: 0, total: 0, filename: "", path: "", error: null } }
     case "setProgress":
       return {
         ...state,
@@ -54,11 +56,15 @@ export function BatchTab() {
   const queue = useAppStore((s) => s.queue)
   const updateQueueItem = useAppStore((s) => s.updateQueueItem)
 
+  // 用 ref 保持 queue 最新引用，避免 listen 回调中闭包过时
+  const queueRef = useRef(queue)
+  useEffect(() => { queueRef.current = queue }, [queue])
+
   const [outputDir, setOutputDir] = useState("")
   const [targetWidth, setTargetWidth] = useState("1000")
   const [quality, setQuality] = useState("60")
   const [run, dispatchRun] = useReducer(batchRunReducer, {
-    processing: false, progress: { current: 0, total: 0, filename: "", error: null }, errors: [], listenFailed: false,
+    processing: false, progress: { current: 0, total: 0, filename: "", path: "", error: null }, errors: [], listenFailed: false,
   })
   const [statusText, setStatusText] = useState("准备就绪")
 
@@ -106,14 +112,12 @@ export function BatchTab() {
       unlisten = await listen<BatchProgress>("batch-progress", (event) => {
         const p = event.payload
         dispatchRun({ type: "setProgress", progress: p, error: p.error ?? undefined })
+        // 使用完整路径精确匹配，避免同名文件误匹配
+        const matchItem = queueRef.current.find((q) => q.path === p.path)
         if (p.error) {
-          // 标记该文件失败
-          const item = queue.find((q) => q.path.endsWith(p.filename) || q.filename === p.filename)
-          if (item) updateQueueItem(item.path, { status: "failed", error: p.error })
+          if (matchItem) updateQueueItem(matchItem.path, { status: "failed", error: p.error })
         } else {
-          // 标记该文件完成
-          const item = queue.find((q) => q.path.endsWith(p.filename) || q.filename === p.filename)
-          if (item) updateQueueItem(item.path, { status: "done" })
+          if (matchItem) updateQueueItem(matchItem.path, { status: "done" })
         }
         setStatusText(`处理中... ${p.current}/${p.total}`)
       })
@@ -135,6 +139,10 @@ export function BatchTab() {
     } finally {
       dispatchRun({ type: "finish" })
       unlisten?.()
+      // 将仍为 processing 的队列项恢复为 failed
+      queueRef.current.forEach((q) => {
+        if (q.status === "processing") updateQueueItem(q.path, { status: "failed", error: "处理中断" })
+      })
     }
   }, [queue, outputDir, targetWidth, quality, updateQueueItem])
 

@@ -46,23 +46,17 @@ function App() {
       if (args?.mode === "edit" && args.file) {
         setView("single")
         setEditingFile(args.file)
-      } else if (args?.mode === "browse") {
+      } else if (args?.mode === "browse" && args.folder) {
         setView("browse")
-        if (args.folder) {
-          setCurrentFolder(args.folder)
-        } else if (args.file) {
-          // 双击图片：用文件所在目录
-          const sep = args.file.lastIndexOf("\\") >= 0 ? "\\" : "/"
-          const folder = args.file.substring(0, args.file.lastIndexOf(sep))
-          if (folder) setCurrentFolder(folder)
-        }
-        // 冷启动时：lastFolder 已在 hydrate 里设到 currentFolder
-        if (!args.folder && !args.file) {
-          const cur = useAppStore.getState().lastFolder
-          if (cur) setCurrentFolder(cur)
-        }
+        setCurrentFolder(args.folder)
+      } else if (args?.mode === "browse" && args.file) {
+        // 双击图片：用文件所在目录
+        setView("browse")
+        const sep = args.file.lastIndexOf("\\") >= 0 ? "\\" : "/"
+        const folder = args.file.substring(0, args.file.lastIndexOf(sep))
+        if (folder) setCurrentFolder(folder)
       } else {
-        // cold：默认浏览视图，hydrate 阶段已设了 currentFolder（如有）
+        // cold 或 browse 无指定目录：使用上次打开的目录
         setView("browse")
         const cur = useAppStore.getState().lastFolder
         if (cur) setCurrentFolder(cur)
@@ -86,7 +80,13 @@ function App() {
           setEditingFile(a.file)
         } else if (a.mode === "browse") {
           setView("browse")
-          if (a.folder) setCurrentFolder(a.folder)
+          if (a.folder) {
+            setCurrentFolder(a.folder)
+          } else if (a.file) {
+            const sep = a.file.lastIndexOf("\\") >= 0 ? "\\" : "/"
+            const folder = a.file.substring(0, a.file.lastIndexOf(sep))
+            if (folder) setCurrentFolder(folder)
+          }
         }
       })
       unlisten = u

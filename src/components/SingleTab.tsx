@@ -318,7 +318,7 @@ export function SingleTab() {
 
   // ─── Consume editingFile on mount / when set externally ───
   useEffect(() => {
-    if (editingFile && !img.filePath) {
+    if (editingFile && editingFile !== img.filePath) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadImage(editingFile)
       setEditingFile(null)
@@ -345,11 +345,28 @@ export function SingleTab() {
       {/* Canvas */}
       <CropCanvas imagePath={img.displayPath} cropRect={img.cropRect}
         onCropChange={(rect) => dispatchImg({ type: "setCropRect", rect })} onFileDrop={loadImage}
-        onTransformed={(r) => {
-          dispatchImg({ type: "setTempPath", path: r.temp_path, width: r.width, height: r.height })
-          dispatchEdit({ type: "setSize", width: String(r.width), height: String(r.height) })
+        onApplyTransform={async (params) => {
+          const source = img.tempPath || img.filePath
+          if (!source) return
+          try {
+            setStatusText("正在应用变换...")
+            const result = await invoke<ImageResult>("apply_transforms", {
+              path: source,
+              params: { rotations: params.rotations, flipH: params.flipH, flipV: params.flipV },
+            })
+            dispatchImg({ type: "setTempPath", path: result.temp_path, width: result.width, height: result.height })
+            dispatchEdit({ type: "setSize", width: String(result.width), height: String(result.height) })
+            const rotDesc = params.rotations > 0 ? `旋转 ${params.rotations * 90}°` : ""
+            const flipDesc = [
+              params.flipH ? "水平翻转" : "",
+              params.flipV ? "垂直翻转" : "",
+            ].filter(Boolean).join(" + ")
+            setStatusText(`已应用变换：${[rotDesc, flipDesc].filter(Boolean).join(" + ") || "无变换"}`)
+          } catch (e) {
+            setStatusText(`变换失败：${e}`)
+          }
         }}
-        onStatus={setStatusText} />
+      />
 
       {/* Right Panel */}
       <div className="w-72 border-l flex flex-col min-h-0">

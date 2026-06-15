@@ -57,13 +57,13 @@ interface AppState extends PersistedState {
 // ─── 持久化 store 句柄（懒加载）───
 
 const STORE_FILE = "piccraft-state.json"
-let _store: Store | null = null
+let _storePromise: Promise<Store> | null = null
 
 async function getStore(): Promise<Store> {
-  if (!_store) {
-    _store = await Store.load(STORE_FILE)
+  if (!_storePromise) {
+    _storePromise = Store.load(STORE_FILE)
   }
-  return _store
+  return _storePromise
 }
 
 async function persistKey<T>(key: keyof PersistedState, value: T): Promise<void> {
@@ -146,13 +146,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const s = await getStore()
       const lastFolder = (await s.get<string>("lastFolder")) ?? null
-      const settings = (await s.get<Settings>("settings")) ?? null
+      const rawSettings = await s.get<Settings>("settings")
+      // 运行时验证：确保 fileAssoc 是 string[]，损坏时回退默认值
+      const settings: Settings = rawSettings && Array.isArray(rawSettings.fileAssoc)
+        ? rawSettings
+        : { fileAssoc: ["jpg", "jpeg", "png", "webp", "bmp"] }
       set({
         lastFolder,
         currentFolder: lastFolder,
-        settings: settings ?? {
-          fileAssoc: ["jpg", "jpeg", "png", "webp", "bmp"],
-        },
+        settings,
       })
     } catch (e) {
       console.warn("[store] hydrate failed:", e)

@@ -2,8 +2,7 @@ import React, { useRef, useState, useEffect, useCallback, useReducer } from "rea
 import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group } from "react-konva"
 import { convertFileSrc } from "@tauri-apps/api/core"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
-import { invoke } from "@tauri-apps/api/core"
-import { FlipHorizontal, FlipVertical, RotateCw, RotateCcw, Loader2 } from "lucide-react"
+import { FlipHorizontal, FlipVertical, RotateCw, RotateCcw } from "lucide-react"
 import type Konva from "konva"
 
 export interface CropRect {
@@ -18,8 +17,7 @@ interface CropCanvasProps {
   onCropChange: (rect: CropRect | null) => void
   onFileDrop: (path: string) => void
   cropRect: CropRect | null
-  onTransformed?: (result: { temp_path: string; width: number; height: number }) => void
-  onStatus?: (msg: string) => void
+  onApplyTransform?: (params: { rotations: number; flipH: boolean; flipV: boolean }) => void
 }
 
 const IMG_EXTS = ["jpg", "jpeg", "png", "webp", "bmp"]
@@ -32,7 +30,7 @@ const CROP_ANCHORS: string[] = ["top-left", "top-center", "top-right", "middle-l
 const boundBoxFn = (oldBox: { x: number; y: number; width: number; height: number; rotation: number }, newBox: { x: number; y: number; width: number; height: number; rotation: number }) =>
   (newBox.width < MIN_CROP || newBox.height < MIN_CROP) ? oldBox : newBox
 
-function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTransformed, onStatus }: CropCanvasProps) {
+function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onApplyTransform }: CropCanvasProps) {
   const stageRef = useRef<Konva.Stage>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
   const rectRef = useRef<Konva.Rect>(null)
@@ -64,12 +62,10 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
   interface UIState {
     isDragOver: boolean
     toolbarVisible: boolean
-    transforming: boolean
   }
   type UIAction =
     | { type: "setDragOver"; value: boolean }
     | { type: "setToolbarVisible"; value: boolean }
-    | { type: "setTransforming"; value: boolean }
 
   const [ui, dispatchUI] = useReducer(
     (state: UIState, action: UIAction): UIState => {
@@ -78,12 +74,42 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
           return { ...state, isDragOver: action.value }
         case "setToolbarVisible":
           return { ...state, toolbarVisible: action.value }
-        case "setTransforming":
-          return { ...state, transforming: action.value }
       }
     },
-    { isDragOver: false, toolbarVisible: false, transforming: false },
+    { isDragOver: false, toolbarVisible: false },
   )
+
+  // 变换状态（旋转/翻转，纯前端预览）
+  interface TransformState {
+    rotations: number  // 顺时针 90° 次数 (0-3)
+    flipH: boolean
+    flipV: boolean
+  }
+  type TransformAction =
+    | { type: "rotateCW" }
+    | { type: "rotateCCW" }
+    | { type: "flipH" }
+    | { type: "flipV" }
+    | { type: "reset" }
+
+  const transformReducer = (state: TransformState, action: TransformAction): TransformState => {
+    switch (action.type) {
+      case "rotateCW":
+        return { ...state, rotations: (state.rotations + 1) % 4 }
+      case "rotateCCW":
+        return { ...state, rotations: (state.rotations + 3) % 4 }
+      case "flipH":
+        return { ...state, flipH: !state.flipH }
+      case "flipV":
+        return { ...state, flipV: !state.flipV }
+      case "reset":
+        return { rotations: 0, flipH: false, flipV: false }
+    }
+  }
+
+  const [transform, dispatchTransform] = useReducer(transformReducer, {
+    rotations: 0, flipH: false, flipV: false,
+  })
 
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 })
 
@@ -132,29 +158,18 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
     }
   }, [])
 
-  // ─── Transform: flip / rotate ───
-  const handleTransform = useCallback(async (mode: "flip-h" | "flip-v" | "rot-cw" | "rot-ccw") => {
-    const source = imagePath
-    if (!source || ui.transforming) return
-    dispatchUI({ type: "setTransforming", value: true })
-    try {
-      const result = await invoke<{ temp_path: string; width: number; height: number }>(
-        "transform_image",
-        { path: source, mode },
-      )
-      onTransformed?.(result)
-      onStatus?.(
-        mode === "flip-h" ? "已水平翻转"
-        : mode === "flip-v" ? "已垂直翻转"
-        : mode === "rot-cw" ? "已顺时针旋转 90°"
-        : "已逆时针旋转 90°"
-      )
-    } catch (e) {
-      onStatus?.(`变换失败：${e}`)
-    } finally {
-      dispatchUI({ type: "setTransforming", value: false })
+  // ─── Transform: 即时预览（纯前端） ───
+  const handleTransform = useCallback((mode: "flip-h" | "flip-v" | "rot-cw" | "rot-ccw") => {
+    if (!imagePath) return
+    // 旋转/翻转时清除裁剪框（坐标映射在变换状态下不正确）
+    if (cropRect) onCropChange(null)
+    switch (mode) {
+      case "rot-cw":  dispatchTransform({ type: "rotateCW" }); break
+      case "rot-ccw": dispatchTransform({ type: "rotateCCW" }); break
+      case "flip-h":  dispatchTransform({ type: "flipH" }); break
+      case "flip-v":  dispatchTransform({ type: "flipV" }); break
     }
-  }, [imagePath, ui.transforming, onTransformed, onStatus])
+  }, [imagePath, cropRect, onCropChange])
 
   // ─── Container Resize ───
   useEffect(() => {
@@ -167,6 +182,11 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
     observer.observe(container)
     return () => observer.disconnect()
   }, [])
+
+  // ─── 图片路径变化时重置变换 ───
+  useEffect(() => {
+    dispatchTransform({ type: "reset" })
+  }, [imagePath])
 
   // ─── Image Loading ───
   useEffect(() => {
@@ -215,9 +235,20 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
   const padding = 40
   const aw = stageSize.width - padding * 2
   const ah = stageSize.height - padding * 2
-  const scale = imgLoad.image ? Math.min(aw / imgLoad.imageSize.width, ah / imgLoad.imageSize.height, 1) : 1
-  const offsetX = (stageSize.width - imgLoad.imageSize.width * scale) / 2
-  const offsetY = (stageSize.height - imgLoad.imageSize.height * scale) / 2
+  // 旋转 90°/270° 时宽高互换（用于 fit 计算）
+  const isRotated = transform.rotations % 2 === 1
+  const logicalW = isRotated ? imgLoad.imageSize.height : imgLoad.imageSize.width
+  const logicalH = isRotated ? imgLoad.imageSize.width : imgLoad.imageSize.height
+  const scale = imgLoad.image ? Math.min(aw / logicalW, ah / logicalH, 1) : 1
+  // 视觉边界框的左上角（用于裁剪坐标映射）
+  const offsetX = (stageSize.width - logicalW * scale) / 2
+  const offsetY = (stageSize.height - logicalH * scale) / 2
+  // 图片实际渲染尺寸（始终用原始尺寸，旋转由 Konva 处理）
+  const imgW = imgLoad.imageSize.width * scale
+  const imgH = imgLoad.imageSize.height * scale
+  // 图片中心点（旋转围绕此点）
+  const imgCX = offsetX + logicalW * scale / 2
+  const imgCY = offsetY + logicalH * scale / 2
 
   useEffect(() => {
     scaleRef.current = scale
@@ -382,8 +413,8 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
       width: Math.round(Math.max(MIN_CROP, node.width() * sx / s)),
       height: Math.round(Math.max(MIN_CROP, node.height() * sy / s)),
     }
-    if (r.x + r.width > imgLoad.imageSize.width) r.width = imgLoad.imageSize.width - r.x
-    if (r.y + r.height > imgLoad.imageSize.height) r.height = imgLoad.imageSize.height - r.y
+    if (r.x + r.width > imgLoad.imageSize.width) r.width = Math.max(MIN_CROP, imgLoad.imageSize.width - r.x)
+    if (r.y + r.height > imgLoad.imageSize.height) r.height = Math.max(MIN_CROP, imgLoad.imageSize.height - r.y)
     onCropChangeRef.current(r)
   }, [imgLoad.imageSize])
 
@@ -399,8 +430,14 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
       width: Math.round(node.width() / s),
       height: Math.round(node.height() / s),
     }
-    if (r.x + r.width > imgLoad.imageSize.width) r.x = Math.max(0, imgLoad.imageSize.width - r.width)
-    if (r.y + r.height > imgLoad.imageSize.height) r.y = Math.max(0, imgLoad.imageSize.height - r.height)
+    if (r.x + r.width > imgLoad.imageSize.width) {
+      r.x = Math.max(0, imgLoad.imageSize.width - r.width)
+      r.width = Math.min(r.width, imgLoad.imageSize.width - r.x)
+    }
+    if (r.y + r.height > imgLoad.imageSize.height) {
+      r.y = Math.max(0, imgLoad.imageSize.height - r.height)
+      r.height = Math.min(r.height, imgLoad.imageSize.height - r.y)
+    }
     onCropChangeRef.current(r)
   }, [imgLoad.imageSize])
 
@@ -439,27 +476,35 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
             ui.toolbarVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2 pointer-events-none"
           }`}
         >
-          {ui.transforming ? (
-            <div className="px-3 py-1.5 flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" />
-              处理中...
-            </div>
-          ) : (
-            toolbarButtons.map(({ mode, label, icon: Icon }) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => handleTransform(mode)}
-                className="group relative p-2 rounded-md hover:bg-accent transition-colors disabled:opacity-50"
-                disabled={ui.transforming}
-                aria-label={label}
-              >
-                <Icon className="size-4" />
-                <span className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 px-2 py-0.5 text-[10px] whitespace-nowrap rounded bg-foreground text-background opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                  {label}
-                </span>
-              </button>
-            ))
+          {toolbarButtons.map(({ mode, label, icon: Icon }) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => handleTransform(mode)}
+              className="group relative p-2 rounded-md hover:bg-accent transition-colors"
+              aria-label={label}
+            >
+              <Icon className="size-4" />
+              <span className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 px-2 py-0.5 text-[10px] whitespace-nowrap rounded bg-foreground text-background opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                {label}
+              </span>
+            </button>
+          ))}
+          {(transform.rotations !== 0 || transform.flipH || transform.flipV) && (
+            <button
+              type="button"
+              onClick={() => {
+                onApplyTransform?.({
+                  rotations: transform.rotations,
+                  flipH: transform.flipH,
+                  flipV: transform.flipV,
+                })
+                dispatchTransform({ type: "reset" })
+              }}
+              className="px-2 py-1 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              应用
+            </button>
           )}
         </div>
       )}
@@ -468,8 +513,14 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
         <Stage ref={stageRef} width={stageSize.width} height={stageSize.height}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}>
           <Layer listening={false}>
-            <KonvaImage image={imgLoad.image} x={offsetX} y={offsetY}
-              width={imgLoad.imageSize.width * scale} height={imgLoad.imageSize.height * scale} />
+            <KonvaImage image={imgLoad.image}
+              x={imgCX} y={imgCY}
+              width={imgW} height={imgH}
+              offsetX={imgW / 2} offsetY={imgH / 2}
+              rotation={transform.rotations * 90}
+              scaleX={transform.flipH ? -1 : 1}
+              scaleY={transform.flipV ? -1 : 1}
+            />
           </Layer>
           <Layer>
             <Group ref={overlayRef} visible={false}>

@@ -25,6 +25,8 @@ pub struct BatchProgress {
     pub current: usize,
     pub total: usize,
     pub filename: String,
+    /// 完整文件路径，用于前端精确匹配队列项
+    pub path: String,
     pub error: Option<String>,
 }
 
@@ -51,6 +53,17 @@ pub struct ImageResult {
     pub temp_path: String,
     pub width: u32,
     pub height: u32,
+}
+
+/// 组合变换参数
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TransformParams {
+    /// 顺时针旋转次数 (0-3)，每次 90°
+    pub rotations: u32,
+    /// 是否水平翻转（在旋转之后应用）
+    pub flip_h: bool,
+    /// 是否垂直翻转（在旋转之后应用）
+    pub flip_v: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -153,6 +166,34 @@ pub fn transform_image(path: String, mode: String) -> Result<ImageResult, String
     })
 }
 
+/// 应用组合变换（旋转 + 翻转），一次性执行
+#[tauri::command]
+pub fn apply_transforms(path: String, params: TransformParams) -> Result<ImageResult, String> {
+    check_file_size(&path)?;
+    let mut img = image::open(&path).map_err(|e| format!("无法打开图片: {e}"))?;
+
+    // 旋转：rotations 次顺时针 90°
+    for _ in 0..(params.rotations % 4) {
+        img = img.rotate90();
+    }
+
+    // 翻转（旋转之后应用）
+    if params.flip_h {
+        img = img.fliph();
+    }
+    if params.flip_v {
+        img = img.flipv();
+    }
+
+    let temp_path = temp_file_path(&path, "transformed")?;
+    save_to_temp(&img, &temp_path)?;
+    Ok(ImageResult {
+        temp_path: temp_path.to_string_lossy().to_string(),
+        width: img.width(),
+        height: img.height(),
+    })
+}
+
 /// 保存图片到目标路径
 #[tauri::command]
 pub fn save_image(
@@ -215,6 +256,8 @@ pub fn save_image(
     let file_size = std::fs::metadata(save_path)
         .map_err(|e| format!("获取文件大小失败: {e}"))?
         .len();
+    // 保存成功后清理临时文件
+    let _ = std::fs::remove_file(Path::new(&temp_path));
     Ok(SaveResult {
         path: save_path.to_string_lossy().to_string(),
         file_size,
@@ -251,36 +294,11 @@ pub async fn batch_process(
         Ok(entries)
     }).await.map_err(|e| format!("任务执行失败: {e}"))??;
 
-    let total = entries.len();
-    let mut errors = Vec::new();
-    for (i, path) in entries.iter().enumerate() {
-        let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-        let out_path = PathBuf::from(&output_dir).join(&filename);
-        let path_clone = path.clone();
-        let out_path_clone = out_path.clone();
-        let result = tauri::async_runtime::spawn_blocking(move || {
-            process_single_batch(&path_clone, &out_path_clone, target_width, quality)
-        }).await.map_err(|e| format!("任务执行失败: {e}"))?;
-        match result {
-            Ok(()) => {
-                let _ = app.emit("batch-progress", BatchProgress {
-                    current: i + 1, total, filename: filename.clone(), error: None,
-                });
-            }
-            Err(e) => {
-                errors.push(filename.clone());
-                let _ = app.emit("batch-progress", BatchProgress {
-                    current: i + 1, total, filename: filename.clone(), error: Some(e.clone()),
-                });
-            }
-        }
+    if entries.is_empty() {
+        return Err("目录中没有图片文件".to_string());
     }
-    let msg = if errors.is_empty() {
-        format!("完成！共处理 {} 张图片", total)
-    } else {
-        format!("完成！共 {} 张，{} 张失败：{}", total, errors.len(), errors.join("、"))
-    };
-    Ok(msg)
+
+    execute_batch_processing(app, entries, output_dir, target_width, quality).await
 }
 
 /// 批量处理队列版本：接收显式的图片路径列表（来自浏览视图的队列）
@@ -297,13 +315,43 @@ pub async fn batch_process_queue(
 
     let entries: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).filter(|p| p.is_file()).collect();
     if entries.is_empty() { return Err("队列中的文件全部失效".to_string()); }
-    std::fs::create_dir_all(&output_dir).map_err(|e| format!("创建输出目录失败: {e}"))?;
+    let output_dir_clone = output_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        std::fs::create_dir_all(&output_dir_clone).map_err(|e| format!("创建输出目录失败: {e}"))
+    }).await.map_err(|e| format!("创建目录任务失败: {e}"))??;
 
+    execute_batch_processing(app, entries, output_dir, target_width, quality).await
+}
+
+/// 执行批量处理的核心逻辑（内部函数）
+async fn execute_batch_processing(
+    app: tauri::AppHandle,
+    entries: Vec<PathBuf>,
+    output_dir: String,
+    target_width: u32,
+    quality: u8,
+) -> Result<String, String> {
     let total = entries.len();
     let mut errors = Vec::new();
+    let mut used_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (i, path) in entries.iter().enumerate() {
         let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-        let out_path = PathBuf::from(&output_dir).join(&filename);
+        // 同名文件自动重命名，避免覆盖
+        let unique_name = if used_names.contains(&filename) {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+            let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+            let mut idx = 1u32;
+            let mut candidate = format!("{}_{}{}", stem, idx, ext);
+            while used_names.contains(&candidate) {
+                idx += 1;
+                candidate = format!("{}_{}{}", stem, idx, ext);
+            }
+            candidate
+        } else {
+            filename.clone()
+        };
+        used_names.insert(unique_name.clone());
+        let out_path = PathBuf::from(&output_dir).join(&unique_name);
         let path_clone = path.clone();
         let out_path_clone = out_path.clone();
         let result = tauri::async_runtime::spawn_blocking(move || {
@@ -312,13 +360,13 @@ pub async fn batch_process_queue(
         match result {
             Ok(()) => {
                 let _ = app.emit("batch-progress", BatchProgress {
-                    current: i + 1, total, filename: filename.clone(), error: None,
+                    current: i + 1, total, filename: filename.clone(), path: path.to_string_lossy().to_string(), error: None,
                 });
             }
             Err(e) => {
                 errors.push(filename.clone());
                 let _ = app.emit("batch-progress", BatchProgress {
-                    current: i + 1, total, filename: filename.clone(), error: Some(e.clone()),
+                    current: i + 1, total, filename: filename.clone(), path: path.to_string_lossy().to_string(), error: Some(e.clone()),
                 });
             }
         }
@@ -370,12 +418,18 @@ static RNG_COUNTER: AtomicU64 = AtomicU64::new(0);
 fn temp_file_path(original: &str, suffix: &str) -> Result<PathBuf, String> {
     let orig = Path::new(original);
     let stem = orig.file_stem().unwrap_or_default().to_string_lossy();
+    // 根据源图格式选择临时文件扩展名，避免 JPEG→PNG 无谓转码
+    let ext = orig.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .filter(|e| matches!(e.as_str(), "jpg" | "jpeg" | "png" | "webp" | "bmp"))
+        .unwrap_or_else(|| "png".to_string());
     let ts = SystemTime::now().duration_since(UNIX_EPOCH)
         .map_err(|e| format!("系统时间错误: {e}"))?
         .as_nanos();
     let r = RNG_COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir();
-    let filename = format!("piccraft_{stem}_{ts}_{r}_{suffix}.png");
+    let filename = format!("piccraft_{stem}_{ts}_{r}_{suffix}.{ext}");
     Ok(dir.join(filename))
 }
 
@@ -513,7 +567,7 @@ mod file_assoc {
 
     pub fn write_verb(verb: &str, extra_flag: Option<&str>) -> Result<(), String> {
         let cmd = build_command(extra_flag)?;
-        let path = format!(r"Software\Classes\SystemFileAssociations\image\shell\{}", verb);
+        let path = format!(r"Software\Classes\SystemFileAssociations\image\shell\{}\command", verb);
         let (key, _disp) = HKCU.create_subkey(&path).map_err(|e| format!("创建 {path} 失败: {e}"))?;
         key.set_value("", &cmd).map_err(|e| format!("设置 {verb} command 失败: {e}"))?;
         Ok(())
