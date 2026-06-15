@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useReducer } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { open, save, ask } from "@tauri-apps/plugin-dialog"
 import { Button } from "@/components/ui/button"
@@ -30,22 +30,88 @@ interface SaveResult {
 
 const IMG_EXTS = ["jpg", "jpeg", "png", "webp", "bmp"]
 
+// 图片文件相关状态
+interface ImageState {
+  filePath: string
+  imageInfo: ImageInfo | null
+  displayPath: string | null
+  tempPath: string | null
+  cropRect: CropRect | null
+  hasImage: boolean
+  isPng: boolean
+}
+
+type ImageAction =
+  | { type: "loadImage"; path: string; info: ImageInfo }
+  | { type: "setDisplayPath"; path: string }
+  | { type: "setTempPath"; path: string; width: number; height: number }
+  | { type: "setCropRect"; rect: CropRect | null }
+  | { type: "resetToOriginal" }
+
+function imageReducer(state: ImageState, action: ImageAction): ImageState {
+  switch (action.type) {
+    case "loadImage":
+      return {
+        filePath: action.path,
+        imageInfo: action.info,
+        displayPath: action.path,
+        tempPath: null,
+        cropRect: null,
+        hasImage: true,
+        isPng: action.info.format.toLowerCase().includes("png"),
+      }
+    case "setDisplayPath":
+      return { ...state, displayPath: action.path }
+    case "setTempPath":
+      return { ...state, displayPath: action.path, tempPath: action.path, cropRect: null }
+    case "setCropRect":
+      return { ...state, cropRect: action.rect }
+    case "resetToOriginal":
+      return state.filePath
+        ? { ...state, displayPath: state.filePath, tempPath: null, cropRect: null }
+        : state
+  }
+}
+
+// 编辑参数相关状态
+interface EditState {
+  width: string
+  height: string
+  keepAspect: boolean
+  quality: string
+}
+
+type EditAction =
+  | { type: "setWidth"; value: string }
+  | { type: "setHeight"; value: string }
+  | { type: "setKeepAspect"; value: boolean }
+  | { type: "setQuality"; value: string }
+  | { type: "setSize"; width: string; height: string }
+
+function editReducer(state: EditState, action: EditAction): EditState {
+  switch (action.type) {
+    case "setWidth":
+      return { ...state, width: action.value }
+    case "setHeight":
+      return { ...state, height: action.value }
+    case "setKeepAspect":
+      return { ...state, keepAspect: action.value }
+    case "setQuality":
+      return { ...state, quality: action.value }
+    case "setSize":
+      return { ...state, width: action.width, height: action.height }
+  }
+}
+
 export function SingleTab() {
 
-  const [filePath, setFilePath] = useState("")
-  const [imageInfo, setImageInfo] = useState<ImageInfo | null>(null)
-  const [displayPath, setDisplayPath] = useState<string | null>(null)
-  const [tempPath, setTempPath] = useState<string | null>(null)
-  const [cropRect, setCropRect] = useState<CropRect | null>(null)
-
-  const [width, setWidth] = useState("800")
-  const [height, setHeight] = useState("600")
-  const [keepAspect, setKeepAspect] = useState(true)
-  const [quality, setQuality] = useState("85")
-
-  const [hasImage, setHasImage] = useState(false)
+  const [img, dispatchImg] = useReducer(imageReducer, {
+    filePath: "", imageInfo: null, displayPath: null, tempPath: null, cropRect: null, hasImage: false, isPng: false,
+  })
+  const [edit, dispatchEdit] = useReducer(editReducer, {
+    width: "800", height: "600", keepAspect: true, quality: "85",
+  })
   const [statusText, setStatusText] = useState("")
-  const [isPng, setIsPng] = useState(false)
 
   // ─── Store (editingFile 来自外部入口；currentFolder 用于找下一张) ───
   const editingFile = useAppStore((s) => s.editingFile)
@@ -58,16 +124,8 @@ export function SingleTab() {
     if (!path) return
     try {
       const info = await invoke<ImageInfo>("get_image_info", { path })
-      setFilePath(path)
-      setImageInfo(info)
-      // Use asset protocol to load local file in webview
-      setDisplayPath(path)
-      setTempPath(null)
-      setWidth(String(info.width))
-      setHeight(String(info.height))
-      setHasImage(true)
-      setCropRect(null)
-      setIsPng(info.format.toLowerCase().includes("png"))
+      dispatchImg({ type: "loadImage", path, info })
+      dispatchEdit({ type: "setSize", width: String(info.width), height: String(info.height) })
       setStatusText(`原图：${info.width}×${info.height} | ${(info.file_size / 1024).toFixed(0)} KB`)
     } catch (e) {
       setStatusText(`加载失败：${e}`)
@@ -86,93 +144,87 @@ export function SingleTab() {
 
   // ─── Crop ───
   const handleApplyCrop = useCallback(async () => {
-    if (!filePath || !cropRect) return
+    if (!img.filePath || !img.cropRect) return
     try {
       const result = await invoke<ImageResult>("crop_image", {
-        path: tempPath || filePath,
-        x: cropRect.x,
-        y: cropRect.y,
-        width: cropRect.width,
-        height: cropRect.height,
+        path: img.tempPath || img.filePath,
+        x: img.cropRect.x,
+        y: img.cropRect.y,
+        width: img.cropRect.width,
+        height: img.cropRect.height,
       })
-      setDisplayPath(result.temp_path)
-      setTempPath(result.temp_path)
-      setCropRect(null)
-      setWidth(String(result.width))
-      setHeight(String(result.height))
+      dispatchImg({ type: "setTempPath", path: result.temp_path, width: result.width, height: result.height })
+      dispatchEdit({ type: "setSize", width: String(result.width), height: String(result.height) })
       setStatusText(`已裁剪至 ${result.width}×${result.height}`)
     } catch (e) {
       setStatusText(`裁剪失败：${e}`)
     }
-  }, [filePath, tempPath, cropRect])
+  }, [img.filePath, img.tempPath, img.cropRect])
 
-  const handleClearCrop = useCallback(() => setCropRect(null), [])
+  const handleClearCrop = useCallback(() => dispatchImg({ type: "setCropRect", rect: null }), [])
 
   // ─── Resize ───
   const handleResize = useCallback(async () => {
-    if (!filePath) return
+    if (!img.filePath) return
     try {
-      const tw = parseInt(width) || 800
-      const th = parseInt(height) || 600
+      const tw = parseInt(edit.width) || 800
+      const th = parseInt(edit.height) || 600
 
       let finalW = tw, finalH = th
-      if (keepAspect && imageInfo) {
-        const ratio = Math.min(tw / imageInfo.width, th / imageInfo.height)
-        finalW = Math.round(imageInfo.width * ratio)
-        finalH = Math.round(imageInfo.height * ratio)
+      if (edit.keepAspect && img.imageInfo) {
+        const ratio = Math.min(tw / img.imageInfo.width, th / img.imageInfo.height)
+        finalW = Math.round(img.imageInfo.width * ratio)
+        finalH = Math.round(img.imageInfo.height * ratio)
       }
 
       const result = await invoke<ImageResult>("resize_image", {
-        path: tempPath || filePath,
+        path: img.tempPath || img.filePath,
         targetWidth: finalW,
         targetHeight: finalH,
       })
 
-      // Use asset protocol for temp file
-      setDisplayPath(result.temp_path)
-      setTempPath(result.temp_path)
-      setWidth(String(result.width))
-      setHeight(String(result.height))
+      dispatchImg({ type: "setTempPath", path: result.temp_path, width: result.width, height: result.height })
+      dispatchEdit({ type: "setSize", width: String(result.width), height: String(result.height) })
       setStatusText(`已缩放至 ${result.width}×${result.height}`)
     } catch (e) {
       setStatusText(`缩放失败：${e}`)
     }
-  }, [filePath, tempPath, width, height, keepAspect, imageInfo])
+  }, [img.filePath, img.tempPath, img.imageInfo, edit.width, edit.height, edit.keepAspect])
 
   // ─── Aspect Ratio ───
   const handleWidthChange = useCallback((value: string) => {
-    setWidth(value)
-    if (keepAspect && imageInfo) {
+    dispatchEdit({ type: "setWidth", value })
+    if (edit.keepAspect && img.imageInfo) {
       const w = parseInt(value)
       if (w > 0) {
-        setHeight(String(Math.round(w * imageInfo.height / imageInfo.width)))
+        dispatchEdit({ type: "setHeight", value: String(Math.round(w * img.imageInfo.height / img.imageInfo.width)) })
       }
     }
-  }, [keepAspect, imageInfo])
+  }, [edit.keepAspect, img.imageInfo])
 
   const handleHeightChange = useCallback((value: string) => {
-    setHeight(value)
-    if (keepAspect && imageInfo) {
+    dispatchEdit({ type: "setHeight", value })
+    if (edit.keepAspect && img.imageInfo) {
       const h = parseInt(value)
       if (h > 0) {
-        setWidth(String(Math.round(h * imageInfo.width / imageInfo.height)))
+        dispatchEdit({ type: "setWidth", value: String(Math.round(h * img.imageInfo.width / img.imageInfo.height)) })
       }
     }
-  }, [keepAspect, imageInfo])
+  }, [edit.keepAspect, img.imageInfo])
 
   const handleAspectToggle = useCallback((checked: boolean) => {
-    setKeepAspect(checked)
-    if (checked && imageInfo) {
-      const w = parseInt(width)
+    dispatchEdit({ type: "setKeepAspect", value: checked })
+    if (checked && img.imageInfo) {
+      const w = parseInt(edit.width)
       if (w > 0) {
-        setHeight(String(Math.round(w * imageInfo.height / imageInfo.width)))
+        dispatchEdit({ type: "setHeight", value: String(Math.round(w * img.imageInfo.height / img.imageInfo.width)) })
       }
     }
-  }, [imageInfo, width])
+  }, [img.imageInfo, edit.width])
 
   // ─── Save As ───
   const handleSaveAs = useCallback(async () => {
-    const source = tempPath || filePath
+    const source = img.tempPath || img.filePath
     if (!source) return
     try {
       const selected = await save({
@@ -192,18 +244,18 @@ export function SingleTab() {
         tempPath: source,
         savePath: selected,
         format: fmt,
-        quality: parseInt(quality) || 85,
+        quality: parseInt(edit.quality) || 85,
       })
 
       setStatusText(`已保存：${result.path} (${(result.file_size / 1024).toFixed(0)} KB)`)
     } catch (e) {
       setStatusText(`保存失败：${e}`)
     }
-  }, [tempPath, filePath, quality])
+  }, [img.tempPath, img.filePath, edit.quality])
 
   // ─── Overwrite ───
   const handleOverwrite = useCallback(async () => {
-    if (!tempPath || !filePath) return
+    if (!img.tempPath || !img.filePath) return
     const confirmed = await ask("确定要覆盖原始图片吗？此操作不可撤销。", {
       title: "覆盖确认",
       kind: "warning",
@@ -212,39 +264,37 @@ export function SingleTab() {
     })
     if (!confirmed) return
     try {
-      const ext = filePath.split(".").pop()?.toLowerCase() || "jpg"
+      const ext = img.filePath.split(".").pop()?.toLowerCase() || "jpg"
       const fmt = ext === "jpeg" ? "jpg" : ext
 
       const result = await invoke<SaveResult>("save_image", {
-        tempPath,
-        savePath: filePath,
+        tempPath: img.tempPath,
+        savePath: img.filePath,
         format: fmt,
-        quality: parseInt(quality) || 85,
+        quality: parseInt(edit.quality) || 85,
       })
 
       setStatusText(`已覆盖：${result.path} (${(result.file_size / 1024).toFixed(0)} KB)`)
     } catch (e) {
       setStatusText(`覆盖失败：${e}`)
     }
-  }, [tempPath, filePath, quality])
+  }, [img.tempPath, img.filePath, edit.quality])
 
   // ─── Reset ───
   const handleReset = useCallback(() => {
-    if (filePath) {
-      setTempPath(null)
-      setDisplayPath(filePath)
-      if (imageInfo) {
-        setWidth(String(imageInfo.width))
-        setHeight(String(imageInfo.height))
+    if (img.filePath) {
+      dispatchImg({ type: "resetToOriginal" })
+      if (img.imageInfo) {
+        dispatchEdit({ type: "setSize", width: String(img.imageInfo.width), height: String(img.imageInfo.height) })
       }
       setStatusText("已恢复原始图片")
     }
-  }, [filePath, imageInfo])
+  }, [img.filePath, img.imageInfo])
 
   // ─── Enqueue & Open Next ───
   const handleEnqueueAndNext = useCallback(async () => {
-    if (!filePath) return
-    enqueue([filePath])
+    if (!img.filePath) return
+    enqueue([img.filePath])
 
     if (!currentFolder) {
       setStatusText("已加入队列（无可用目录，无法打开下一张）")
@@ -253,7 +303,7 @@ export function SingleTab() {
 
     try {
       const entries = await invoke<ImageInfo[]>("read_dir", { folder: currentFolder })
-      const idx = entries.findIndex((e) => e.path === filePath)
+      const idx = entries.findIndex((e) => e.path === img.filePath)
       const next = idx >= 0 ? entries[idx + 1] : entries[0]
       if (!next) {
         setStatusText("已加入队列（已是当前目录最后一张）")
@@ -264,16 +314,16 @@ export function SingleTab() {
     } catch (e) {
       setStatusText(`已加入队列（读目录失败：${e}）`)
     }
-  }, [filePath, currentFolder, enqueue, loadImage])
+  }, [img.filePath, currentFolder, enqueue, loadImage])
 
   // ─── Consume editingFile on mount / when set externally ───
   useEffect(() => {
-    if (editingFile && !filePath) {
+    if (editingFile && !img.filePath) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadImage(editingFile)
       setEditingFile(null)
     }
-  }, [editingFile, filePath, loadImage, setEditingFile])
+  }, [editingFile, img.filePath, loadImage, setEditingFile])
 
   // ─── Keyboard Shortcuts ───
   useEffect(() => {
@@ -293,14 +343,11 @@ export function SingleTab() {
   return (
     <div className="flex h-full">
       {/* Canvas */}
-      <CropCanvas imagePath={displayPath} cropRect={cropRect}
-        onCropChange={setCropRect} onFileDrop={loadImage}
+      <CropCanvas imagePath={img.displayPath} cropRect={img.cropRect}
+        onCropChange={(rect) => dispatchImg({ type: "setCropRect", rect })} onFileDrop={loadImage}
         onTransformed={(r) => {
-          setDisplayPath(r.temp_path)
-          setTempPath(r.temp_path)
-          setWidth(String(r.width))
-          setHeight(String(r.height))
-          setCropRect(null)
+          dispatchImg({ type: "setTempPath", path: r.temp_path, width: r.width, height: r.height })
+          dispatchEdit({ type: "setSize", width: String(r.width), height: String(r.height) })
         }}
         onStatus={setStatusText} />
 
@@ -312,7 +359,7 @@ export function SingleTab() {
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">选择图片</Label>
             <div className="flex gap-2">
               <Input
-                value={filePath ? filePath.split(/[/\\]/).pop() : ""}
+                value={img.filePath ? img.filePath.split(/[/\\]/).pop() : ""}
                 readOnly
                 placeholder="未选择图片"
                 className="text-xs flex-1"
@@ -329,7 +376,7 @@ export function SingleTab() {
             <p className="text-xs text-muted-foreground">{statusText}</p>
           )}
 
-          {isPng && (
+          {img.isPng && (
             <div className="text-xs p-2 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400">
               PNG 为无损格式，压缩将使用调色板量化
             </div>
@@ -344,28 +391,28 @@ export function SingleTab() {
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <Label className="text-xs w-8">宽度</Label>
-                <Input type="number" min="1" value={width} onChange={(e) => handleWidthChange(e.target.value)} className="h-8 text-xs" disabled={!hasImage} />
+                <Input type="number" min="1" value={edit.width} onChange={(e) => handleWidthChange(e.target.value)} className="h-8 text-xs" disabled={!img.hasImage} />
                 <span className="text-xs text-muted-foreground">px</span>
               </div>
               <div className="flex items-center gap-2">
                 <Label className="text-xs w-8">高度</Label>
-                <Input type="number" min="1" value={height} onChange={(e) => handleHeightChange(e.target.value)} className="h-8 text-xs" disabled={!hasImage} />
+                <Input type="number" min="1" value={edit.height} onChange={(e) => handleHeightChange(e.target.value)} className="h-8 text-xs" disabled={!img.hasImage} />
                 <span className="text-xs text-muted-foreground">px</span>
               </div>
             </div>
 
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={keepAspect} onChange={(e) => handleAspectToggle(e.target.checked)} className="rounded border-input" disabled={!hasImage} />
+              <input type="checkbox" checked={edit.keepAspect} onChange={(e) => handleAspectToggle(e.target.checked)} className="rounded border-input" disabled={!img.hasImage} />
               <span className="text-xs">保持原图比例</span>
             </label>
 
             <div className="flex items-center gap-2">
               <Label className="text-xs w-8">质量</Label>
-              <Input type="number" min="1" max="100" value={quality} onChange={(e) => setQuality(e.target.value)} className="h-8 text-xs w-16" disabled={!hasImage} />
+              <Input type="number" min="1" max="100" value={edit.quality} onChange={(e) => dispatchEdit({ type: "setQuality", value: e.target.value })} className="h-8 text-xs w-16" disabled={!img.hasImage} />
               <span className="text-xs text-muted-foreground">1-100</span>
             </div>
 
-            <Button size="sm" className="w-full" disabled={!hasImage} onClick={handleResize}>应用缩放</Button>
+            <Button size="sm" className="w-full" disabled={!img.hasImage} onClick={handleResize}>应用缩放</Button>
           </div>
 
           <Separator />
@@ -375,10 +422,10 @@ export function SingleTab() {
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">自由裁剪</Label>
             <div className="grid grid-cols-2 gap-2">
               {[
-                { label: "X", value: cropRect?.x ?? 0 },
-                { label: "Y", value: cropRect?.y ?? 0 },
-                { label: "宽", value: cropRect?.width ?? 0 },
-                { label: "高", value: cropRect?.height ?? 0 },
+                { label: "X", value: img.cropRect?.x ?? 0 },
+                { label: "Y", value: img.cropRect?.y ?? 0 },
+                { label: "宽", value: img.cropRect?.width ?? 0 },
+                { label: "高", value: img.cropRect?.height ?? 0 },
               ].map(({ label, value }) => (
                 <div key={label} className="flex items-center gap-1">
                   <Label className="text-xs w-4">{label}</Label>
@@ -387,9 +434,9 @@ export function SingleTab() {
               ))}
             </div>
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" className="flex-1" disabled={!cropRect}
+              <Button size="sm" variant="outline" className="flex-1" disabled={!img.cropRect}
                 onClick={handleApplyCrop}>应用裁剪</Button>
-              <Button size="sm" variant="outline" className="flex-1" disabled={!cropRect}
+              <Button size="sm" variant="outline" className="flex-1" disabled={!img.cropRect}
                 onClick={handleClearCrop}>清除</Button>
             </div>
           </div>
@@ -399,17 +446,17 @@ export function SingleTab() {
           {/* Save */}
           <div className="space-y-2">
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" className="flex-1" disabled={!hasImage} onClick={handleReset}>
+              <Button size="sm" variant="outline" className="flex-1" disabled={!img.hasImage} onClick={handleReset}>
                 <RotateCcw className="size-3 mr-1" />重置
               </Button>
-              <Button size="sm" className="flex-1" disabled={!tempPath} onClick={handleOverwrite}>
+              <Button size="sm" className="flex-1" disabled={!img.tempPath} onClick={handleOverwrite}>
                 <Save className="size-3 mr-1" />覆盖原图
               </Button>
             </div>
-            <Button size="sm" variant="outline" className="w-full" disabled={!hasImage} onClick={handleSaveAs}>
+            <Button size="sm" variant="outline" className="w-full" disabled={!img.hasImage} onClick={handleSaveAs}>
               <Download className="size-3 mr-1" />另存为
             </Button>
-            <Button size="sm" variant="outline" className="w-full" disabled={!hasImage} onClick={handleEnqueueAndNext}>
+            <Button size="sm" variant="outline" className="w-full" disabled={!img.hasImage} onClick={handleEnqueueAndNext}>
               <ListPlus className="size-3 mr-1" />加入队列并打开下一张
             </Button>
             <p className="text-[10px] text-muted-foreground text-right">Ctrl+S 覆盖原图 | Ctrl+Shift+S 另存为</p>

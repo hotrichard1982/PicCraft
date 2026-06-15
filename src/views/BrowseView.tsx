@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react"
+import { useEffect, useState, useCallback, useMemo, useReducer } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { open } from "@tauri-apps/plugin-dialog"
 import { FolderOpen } from "lucide-react"
@@ -24,28 +24,48 @@ const THUMB_MIN = 100
 const THUMB_MAX = 800
 const THUMB_STEP = 0.1 // ±10% / 步
 
+// 目录加载相关状态合并为 reducer
+interface DirState {
+  entries: DirEntry[]
+  loading: boolean
+  error: string | null
+}
+
+type DirAction =
+  | { type: "loadStart" }
+  | { type: "loadSuccess"; entries: DirEntry[] }
+  | { type: "loadError"; error: string }
+  | { type: "clear" }
+
+function dirReducer(state: DirState, action: DirAction): DirState {
+  switch (action.type) {
+    case "loadStart":
+      return { ...state, loading: true, error: null }
+    case "loadSuccess":
+      return { entries: action.entries, loading: false, error: null }
+    case "loadError":
+      return { entries: [], loading: false, error: action.error }
+    case "clear":
+      return { entries: [], loading: false, error: null }
+  }
+}
+
 export function BrowseView() {
   const currentFolder = useAppStore((s) => s.currentFolder)
   const setCurrentFolder = useAppStore((s) => s.setCurrentFolder)
 
-  const [entries, setEntries] = useState<DirEntry[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [dir, dispatch] = useReducer(dirReducer, { entries: [], loading: false, error: null })
   const [thumbSize, setThumbSize] = useState(THUMB_DEFAULT)
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null)
 
   // ─── 调 Rust read_dir 加载目录 ───
   const loadFolder = useCallback(async (folder: string) => {
-    setLoading(true)
-    setError(null)
+    dispatch({ type: "loadStart" })
     try {
       const result = await invoke<DirEntry[]>("read_dir", { folder })
-      setEntries(result)
+      dispatch({ type: "loadSuccess", entries: result })
     } catch (e) {
-      setError(String(e))
-      setEntries([])
-    } finally {
-      setLoading(false)
+      dispatch({ type: "loadError", error: String(e) })
     }
   }, [])
 
@@ -55,7 +75,7 @@ export function BrowseView() {
       // 切换目录时关闭全屏看图
       setFullscreenIndex(null)
     } else {
-      setEntries([])
+      dispatch({ type: "clear" })
     }
   }, [currentFolder, loadFolder])
 
@@ -100,7 +120,7 @@ export function BrowseView() {
     return () => window.removeEventListener("keydown", onKey)
   }, [bumpThumbSize])
 
-  const totalCount = useMemo(() => entries.length, [entries])
+  const totalCount = useMemo(() => dir.entries.length, [dir.entries])
 
   return (
     <div className="h-full flex flex-col" onWheel={handleWheel}>
@@ -125,21 +145,21 @@ export function BrowseView() {
             <FolderOpen className="size-16 opacity-30" />
             <p className="text-sm">点击"打开目录"开始浏览</p>
           </div>
-        ) : loading ? (
+        ) : dir.loading ? (
           <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
             加载中…
           </div>
-        ) : error ? (
+        ) : dir.error ? (
           <div className="h-full flex items-center justify-center text-sm text-destructive">
-            {error}
+            {dir.error}
           </div>
-        ) : entries.length === 0 ? (
+        ) : dir.entries.length === 0 ? (
           <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
             该目录没有图片
           </div>
         ) : (
           <ThumbnailGrid
-            entries={entries}
+            entries={dir.entries}
             thumbSize={thumbSize}
             onOpenFullscreen={(i) => setFullscreenIndex(i)}
           />
@@ -149,7 +169,7 @@ export function BrowseView() {
       {/* 全屏看图 */}
       {fullscreenIndex !== null && (
         <FullscreenViewer
-          entries={entries}
+          entries={dir.entries}
           currentIndex={fullscreenIndex}
           onClose={() => setFullscreenIndex(null)}
           onIndexChange={setFullscreenIndex}

@@ -29,17 +29,7 @@ interface ContextMenuState {
   item: QueueItem
 }
 
-// 进度条用 CSS keyframes；不需要真实百分比
-const PROGRESS_BAR_STYLE = `
-@keyframes qp-progress-slide {
-  0%   { transform: translateX(-100%); }
-  50%  { transform: translateX(0%);    }
-  100% { transform: translateX(100%);  }
-}
-.qp-progress-bar {
-  animation: qp-progress-slide 1.4s ease-in-out infinite;
-}
-`
+// 进度条动画样式已移至 index.css（qp-progress-slide / qp-progress-bar）
 
 /**
  * 状态图标
@@ -269,9 +259,6 @@ export function QueuePanel({ outputDir, onChangeOutputDir }: QueuePanelProps) {
 
   return (
     <>
-      {/* 注入 keyframes */}
-      <style dangerouslySetInnerHTML={{ __html: PROGRESS_BAR_STYLE }} />
-
       <aside className="flex flex-col w-80 shrink-0 h-full border-l bg-card">
         {/* 顶部按钮（sticky） */}
         <div className="sticky top-0 z-10 bg-card border-b p-2 space-y-1.5">

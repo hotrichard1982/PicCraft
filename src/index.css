@@ -62,6 +62,16 @@
   }
 }
 
+/* 队列面板进度条动画 */
+@keyframes qp-progress-slide {
+  0%   { transform: translateX(-100%); }
+  50%  { transform: translateX(0%);    }
+  100% { transform: translateX(100%);  }
+}
+.qp-progress-bar {
+  animation: qp-progress-slide 1.4s ease-in-out infinite;
+}
+
 /* Tauri window drag region */
 .titlebar {
   -webkit-app-region: drag;

@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from "react"
+import React, { useRef, useState, useEffect, useCallback, useReducer } from "react"
 import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group } from "react-konva"
 import { convertFileSrc } from "@tauri-apps/api/core"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
@@ -39,12 +39,53 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
   const overlayRef = useRef<Konva.Group>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const [image, setImage] = useState<HTMLImageElement | null>(null)
+  // 图片加载相关状态
+  interface ImgLoadState {
+    image: HTMLImageElement | null
+    imageSize: { width: number; height: number }
+  }
+  type ImgLoadAction =
+    | { type: "loaded"; image: HTMLImageElement; width: number; height: number }
+    | { type: "clear" }
+
+  const [imgLoad, dispatchImgLoad] = useReducer(
+    (_state: ImgLoadState, action: ImgLoadAction): ImgLoadState => {
+      switch (action.type) {
+        case "loaded":
+          return { image: action.image, imageSize: { width: action.width, height: action.height } }
+        case "clear":
+          return { image: null, imageSize: { width: 0, height: 0 } }
+      }
+    },
+    { image: null, imageSize: { width: 0, height: 0 } },
+  )
+
+  // UI 状态
+  interface UIState {
+    isDragOver: boolean
+    toolbarVisible: boolean
+    transforming: boolean
+  }
+  type UIAction =
+    | { type: "setDragOver"; value: boolean }
+    | { type: "setToolbarVisible"; value: boolean }
+    | { type: "setTransforming"; value: boolean }
+
+  const [ui, dispatchUI] = useReducer(
+    (state: UIState, action: UIAction): UIState => {
+      switch (action.type) {
+        case "setDragOver":
+          return { ...state, isDragOver: action.value }
+        case "setToolbarVisible":
+          return { ...state, toolbarVisible: action.value }
+        case "setTransforming":
+          return { ...state, transforming: action.value }
+      }
+    },
+    { isDragOver: false, toolbarVisible: false, transforming: false },
+  )
+
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 })
-  const [imageSize, setImageSize] = useState({ width: 0, height: 0 })
-  const [isDragOver, setIsDragOver] = useState(false)
-  const [toolbarVisible, setToolbarVisible] = useState(false)
-  const [transforming, setTransforming] = useState(false)
 
   const isDrawingRef = useRef(false)
   const isShowingRef = useRef(false)
@@ -58,7 +99,7 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
 
   useEffect(() => { onCropChangeRef.current = onCropChange }, [onCropChange])
   useEffect(() => { onFileDropRef.current = onFileDrop }, [onFileDrop])
-  useEffect(() => { isDragOverRef.current = isDragOver }, [isDragOver])
+  useEffect(() => { isDragOverRef.current = ui.isDragOver }, [ui.isDragOver])
 
   // ─── Drag & Drop (Tauri v2 webview-level API) ───
   useEffect(() => {
@@ -69,16 +110,16 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
     webview.onDragDropEvent((event) => {
       const { type } = event.payload
       if (type === "drop") {
-        setIsDragOver(false)
+        dispatchUI({ type: "setDragOver", value: false })
         const path = event.payload.paths[0]
         if (path) {
           const ext = path.split(".").pop()?.toLowerCase() || ""
           if (IMG_EXTS.includes(ext)) onFileDropRef.current(path)
         }
       } else if (type === "over") {
-        setIsDragOver(true)
+        dispatchUI({ type: "setDragOver", value: true })
       } else if (type === "leave") {
-        setIsDragOver(false)
+        dispatchUI({ type: "setDragOver", value: false })
       }
     }).then((fn) => {
       if (cancelled) fn()
@@ -94,8 +135,8 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
   // ─── Transform: flip / rotate ───
   const handleTransform = useCallback(async (mode: "flip-h" | "flip-v" | "rot-cw" | "rot-ccw") => {
     const source = imagePath
-    if (!source || transforming) return
-    setTransforming(true)
+    if (!source || ui.transforming) return
+    dispatchUI({ type: "setTransforming", value: true })
     try {
       const result = await invoke<{ temp_path: string; width: number; height: number }>(
         "transform_image",
@@ -111,9 +152,9 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
     } catch (e) {
       onStatus?.(`变换失败：${e}`)
     } finally {
-      setTransforming(false)
+      dispatchUI({ type: "setTransforming", value: false })
     }
-  }, [imagePath, transforming, onTransformed, onStatus])
+  }, [imagePath, ui.transforming, onTransformed, onStatus])
 
   // ─── Container Resize ───
   useEffect(() => {
@@ -131,40 +172,24 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
   useEffect(() => {
     if (!imagePath) return
     let cancelled = false
-    let objectUrl: string | null = null
 
-    const loadImage = async () => {
-      try {
-        const assetUrl = imagePath.startsWith("http") || imagePath.startsWith("asset:") || imagePath.startsWith("blob:")
-          ? imagePath
-          : convertFileSrc(imagePath)
+    const assetUrl = imagePath.startsWith("http") || imagePath.startsWith("asset:") || imagePath.startsWith("blob:")
+      ? imagePath
+      : convertFileSrc(imagePath)
 
-        const response = await fetch(assetUrl)
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        const blob = await response.blob()
-        if (cancelled) return
-
-        objectUrl = URL.createObjectURL(blob)
-        const img = new window.Image()
-        img.onload = () => {
-          if (cancelled) return
-          setImage(img)
-          setImageSize({ width: img.naturalWidth, height: img.naturalHeight })
-        }
-        img.onerror = () => {
-          console.error("[CropCanvas] Failed to load image from:", assetUrl)
-        }
-        img.src = objectUrl
-      } catch (err) {
-        console.error("[CropCanvas] Failed to fetch image:", err)
-      }
+    const img = new window.Image()
+    img.onload = () => {
+      if (cancelled) return
+      dispatchImgLoad({ type: "loaded", image: img, width: img.naturalWidth, height: img.naturalHeight })
     }
-
-    loadImage()
+    img.onerror = () => {
+      console.error("[CropCanvas] Failed to load image from:", assetUrl)
+    }
+    img.src = assetUrl
 
     return () => {
       cancelled = true
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      img.src = ""
     }
   }, [imagePath])
 
@@ -190,9 +215,9 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
   const padding = 40
   const aw = stageSize.width - padding * 2
   const ah = stageSize.height - padding * 2
-  const scale = image ? Math.min(aw / imageSize.width, ah / imageSize.height, 1) : 1
-  const offsetX = (stageSize.width - imageSize.width * scale) / 2
-  const offsetY = (stageSize.height - imageSize.height * scale) / 2
+  const scale = imgLoad.image ? Math.min(aw / imgLoad.imageSize.width, ah / imgLoad.imageSize.height, 1) : 1
+  const offsetX = (stageSize.width - imgLoad.imageSize.width * scale) / 2
+  const offsetY = (stageSize.height - imgLoad.imageSize.height * scale) / 2
 
   useEffect(() => {
     scaleRef.current = scale
@@ -264,7 +289,7 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
 
   // ─── Mouse Handlers ───
   const handleMouseDown = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (!image) return
+    if (!imgLoad.image) return
     if (e.target !== e.target.getStage()) return
     const pos = e.target.getStage()!.getPointerPosition()
     if (!pos) return
@@ -273,10 +298,10 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
     isDrawingRef.current = true
     isShowingRef.current = false
     onCropChange(null)
-  }, [image, stageToImage, onCropChange])
+  }, [imgLoad.image, stageToImage, onCropChange])
 
   const handleMouseMove = useCallback(() => {
-    if (!isDrawingRef.current || !image) return
+    if (!isDrawingRef.current || !imgLoad.image) return
     if (isDragOverRef.current) return
     if (rafRef.current !== null) return
 
@@ -288,8 +313,8 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
       const ds = drawStartRef.current
       const x1 = Math.max(0, Math.min(ds.x, img.x))
       const y1 = Math.max(0, Math.min(ds.y, img.y))
-      const x2 = Math.min(imageSize.width, Math.max(ds.x, img.x))
-      const y2 = Math.min(imageSize.height, Math.max(ds.y, img.y))
+      const x2 = Math.min(imgLoad.imageSize.width, Math.max(ds.x, img.x))
+      const y2 = Math.min(imgLoad.imageSize.height, Math.max(ds.y, img.y))
       const w = x2 - x1
       const h = y2 - y1
       if (w >= MIN_CROP && h >= MIN_CROP) {
@@ -311,7 +336,7 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
         if (layer) layer.batchDraw()
       }
     })
-  }, [image, stageToImage, imageSize, updateOverlay, showCropUI])
+  }, [imgLoad.image, stageToImage, imgLoad.imageSize, updateOverlay, showCropUI])
 
   const handleMouseUp = useCallback(() => {
     if (!isDrawingRef.current) return
@@ -357,10 +382,10 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
       width: Math.round(Math.max(MIN_CROP, node.width() * sx / s)),
       height: Math.round(Math.max(MIN_CROP, node.height() * sy / s)),
     }
-    if (r.x + r.width > imageSize.width) r.width = imageSize.width - r.x
-    if (r.y + r.height > imageSize.height) r.height = imageSize.height - r.y
+    if (r.x + r.width > imgLoad.imageSize.width) r.width = imgLoad.imageSize.width - r.x
+    if (r.y + r.height > imgLoad.imageSize.height) r.height = imgLoad.imageSize.height - r.y
     onCropChangeRef.current(r)
-  }, [imageSize])
+  }, [imgLoad.imageSize])
 
   const handleDragEnd = useCallback(() => {
     if (!rectRef.current) return
@@ -374,10 +399,10 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
       width: Math.round(node.width() / s),
       height: Math.round(node.height() / s),
     }
-    if (r.x + r.width > imageSize.width) r.x = Math.max(0, imageSize.width - r.width)
-    if (r.y + r.height > imageSize.height) r.y = Math.max(0, imageSize.height - r.height)
+    if (r.x + r.width > imgLoad.imageSize.width) r.x = Math.max(0, imgLoad.imageSize.width - r.width)
+    if (r.y + r.height > imgLoad.imageSize.height) r.y = Math.max(0, imgLoad.imageSize.height - r.height)
     onCropChangeRef.current(r)
-  }, [imageSize])
+  }, [imgLoad.imageSize])
 
   // ─── RAF cleanup on unmount ───
   useEffect(() => {
@@ -401,20 +426,20 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
   return (
     <div
       ref={containerRef}
-      onMouseEnter={() => setToolbarVisible(true)}
-      onMouseLeave={() => setToolbarVisible(false)}
+      onMouseEnter={() => dispatchUI({ type: "setToolbarVisible", value: true })}
+      onMouseLeave={() => dispatchUI({ type: "setToolbarVisible", value: false })}
       className={`relative flex-1 bg-muted/30 m-3 rounded-xl overflow-hidden border-2 border-dashed transition-colors ${
-        isDragOver ? "border-primary border-solid bg-primary/5" : "border-muted-foreground/25"
+        ui.isDragOver ? "border-primary border-solid bg-primary/5" : "border-muted-foreground/25"
       }`}
     >
       {/* Floating transform toolbar */}
-      {imagePath && image && (
+      {imagePath && imgLoad.image && (
         <div
           className={`absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 p-1 rounded-lg bg-card/95 border shadow-lg backdrop-blur-sm transition-all duration-200 ${
-            toolbarVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2 pointer-events-none"
+            ui.toolbarVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2 pointer-events-none"
           }`}
         >
-          {transforming ? (
+          {ui.transforming ? (
             <div className="px-3 py-1.5 flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" />
               处理中...
@@ -426,7 +451,7 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
                 type="button"
                 onClick={() => handleTransform(mode)}
                 className="group relative p-2 rounded-md hover:bg-accent transition-colors disabled:opacity-50"
-                disabled={transforming}
+                disabled={ui.transforming}
                 aria-label={label}
               >
                 <Icon className="size-4" />
@@ -439,12 +464,12 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onTran
         </div>
       )}
 
-      {imagePath && image ? (
+      {imagePath && imgLoad.image ? (
         <Stage ref={stageRef} width={stageSize.width} height={stageSize.height}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}>
           <Layer listening={false}>
-            <KonvaImage image={image} x={offsetX} y={offsetY}
-              width={imageSize.width * scale} height={imageSize.height * scale} />
+            <KonvaImage image={imgLoad.image} x={offsetX} y={offsetY}
+              width={imgLoad.imageSize.width * scale} height={imgLoad.imageSize.height * scale} />
           </Layer>
           <Layer>
             <Group ref={overlayRef} visible={false}>

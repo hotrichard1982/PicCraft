@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react"
+import { useEffect, useState, useRef, useCallback, useReducer } from "react"
 import { Stage, Layer, Image as KonvaImage } from "react-konva"
 import { invoke } from "@tauri-apps/api/core"
 import { convertFileSrc } from "@tauri-apps/api/core"
@@ -24,6 +24,56 @@ interface FullscreenViewerProps {
 
 const TOOLBAR_HIDE_DELAY = 1500
 
+// 图片加载相关状态
+interface ImageLoadState {
+  img: HTMLImageElement | null
+  imgSize: { w: number; h: number }
+  loading: boolean
+  loadError: string | null
+}
+
+type ImageLoadAction =
+  | { type: "loadStart" }
+  | { type: "loadSuccess"; img: HTMLImageElement; w: number; h: number }
+  | { type: "loadError"; error: string }
+
+function imageLoadReducer(state: ImageLoadState, action: ImageLoadAction): ImageLoadState {
+  switch (action.type) {
+    case "loadStart":
+      return { ...state, img: null, loading: true, loadError: null }
+    case "loadSuccess":
+      return { img: action.img, imgSize: { w: action.w, h: action.h }, loading: false, loadError: null }
+    case "loadError":
+      return { ...state, img: null, loading: false, loadError: action.error }
+  }
+}
+
+// 画布视图相关状态
+interface ViewState {
+  stageSize: { w: number; h: number }
+  scale: number
+  pos: { x: number; y: number }
+}
+
+type ViewAction =
+  | { type: "resize"; w: number; h: number }
+  | { type: "setScale"; scale: number }
+  | { type: "setPos"; x: number; y: number }
+  | { type: "setScaleAndPos"; scale: number; x: number; y: number }
+
+function viewReducer(state: ViewState, action: ViewAction): ViewState {
+  switch (action.type) {
+    case "resize":
+      return { ...state, stageSize: { w: action.w, h: action.h } }
+    case "setScale":
+      return { ...state, scale: action.scale }
+    case "setPos":
+      return { ...state, pos: { x: action.x, y: action.y } }
+    case "setScaleAndPos":
+      return { stageSize: state.stageSize, scale: action.scale, pos: { x: action.x, y: action.y } }
+  }
+}
+
 export function FullscreenViewer({
   entries,
   currentIndex,
@@ -34,14 +84,13 @@ export function FullscreenViewer({
   const setView = useAppStore((s) => s.setView)
   const setEditingFile = useAppStore((s) => s.setEditingFile)
 
-  const [img, setImg] = useState<HTMLImageElement | null>(null)
-  const [imgSize, setImgSize] = useState({ w: 0, h: 0 })
-  const [stageSize, setStageSize] = useState({ w: window.innerWidth, h: window.innerHeight })
-  const [scale, setScale] = useState(1)
-  const [pos, setPos] = useState({ x: 0, y: 0 })
+  const [imgLoad, dispatchImgLoad] = useReducer(imageLoadReducer, {
+    img: null, imgSize: { w: 0, h: 0 }, loading: false, loadError: null,
+  })
+  const [view, dispatchView] = useReducer(viewReducer, {
+    stageSize: { w: window.innerWidth, h: window.innerHeight }, scale: 1, pos: { x: 0, y: 0 },
+  })
   const [toolbarVisible, setToolbarVisible] = useState(true)
-  const [loading, setLoading] = useState(false)
-  const [loadError, setLoadError] = useState<string | null>(null)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<unknown>(null)
@@ -57,22 +106,17 @@ export function FullscreenViewer({
   useEffect(() => {
     if (!current) return
     let cancelled = false
-    setLoading(true)
-    setImg(null)
-    setLoadError(null)
+    dispatchImgLoad({ type: "loadStart" })
     const url = convertFileSrc(current.path)
     const i = new window.Image()
     i.onload = () => {
       if (cancelled) return
-      setImg(i)
-      setImgSize({ w: i.naturalWidth, h: i.naturalHeight })
-      setLoading(false)
+      dispatchImgLoad({ type: "loadSuccess", img: i, w: i.naturalWidth, h: i.naturalHeight })
     }
     i.onerror = () => {
       if (cancelled) return
       console.error("[FullscreenViewer] 图片加载失败:", current.path)
-      setLoadError("图片加载失败，请检查文件是否被移动或删除")
-      setLoading(false)
+      dispatchImgLoad({ type: "loadError", error: "图片加载失败，请检查文件是否被移动或删除" })
     }
     i.src = url
     return () => {
@@ -112,28 +156,27 @@ export function FullscreenViewer({
 
   // ─── 适应窗口缩放 ───
   const fitToWindow = useCallback(() => {
-    if (!img || !stageSize.w || !stageSize.h) return
+    if (!imgLoad.img || !view.stageSize.w || !view.stageSize.h) return
     const padding = 40
     const s = Math.min(
-      (stageSize.w - padding * 2) / imgSize.w,
-      (stageSize.h - padding * 2) / imgSize.h,
+      (view.stageSize.w - padding * 2) / imgLoad.imgSize.w,
+      (view.stageSize.h - padding * 2) / imgLoad.imgSize.h,
       1,
     )
-    setScale(s)
-    setPos({
-      x: (stageSize.w - imgSize.w * s) / 2,
-      y: (stageSize.h - imgSize.h * s) / 2,
+    dispatchView({ type: "setScaleAndPos", scale: s,
+      x: (view.stageSize.w - imgLoad.imgSize.w * s) / 2,
+      y: (view.stageSize.h - imgLoad.imgSize.h * s) / 2,
     })
-  }, [img, imgSize, stageSize])
+  }, [imgLoad.img, imgLoad.imgSize, view.stageSize])
 
   // 加载完新图自动 fit
   useEffect(() => {
-    if (img) fitToWindow()
-  }, [img, fitToWindow])
+    if (imgLoad.img) fitToWindow()
+  }, [imgLoad.img, fitToWindow])
 
   // ─── 窗口尺寸 ───
   useEffect(() => {
-    const onResize = () => setStageSize({ w: window.innerWidth, h: window.innerHeight })
+    const onResize = () => dispatchView({ type: "resize", w: window.innerWidth, h: window.innerHeight })
     window.addEventListener("resize", onResize)
     return () => window.removeEventListener("resize", onResize)
   }, [])
@@ -173,23 +216,19 @@ export function FullscreenViewer({
   // ─── 缩放 ───
   const zoom = useCallback(
     (delta: number) => {
-      setScale((s) => {
-        const next = Math.max(0.1, Math.min(8, s * (1 + delta)))
-        return next
-      })
+      dispatchView({ type: "setScale", scale: Math.max(0.1, Math.min(8, view.scale * (1 + delta))) })
     },
-    [],
+    [view.scale],
   )
   const zoomIn = useCallback(() => zoom(0.25), [zoom])
   const zoomOut = useCallback(() => zoom(-0.25), [zoom])
   const actualSize = useCallback(() => {
-    if (!img) return
-    setScale(1)
-    setPos({
-      x: (stageSize.w - imgSize.w) / 2,
-      y: (stageSize.h - imgSize.h) / 2,
+    if (!imgLoad.img) return
+    dispatchView({ type: "setScaleAndPos", scale: 1,
+      x: (view.stageSize.w - imgLoad.imgSize.w) / 2,
+      y: (view.stageSize.h - imgLoad.imgSize.h) / 2,
     })
-  }, [img, imgSize, stageSize])
+  }, [imgLoad.img, imgLoad.imgSize, view.stageSize])
 
   // ─── 滚轮缩放（Ctrl+滚轮 或 直接滚轮）───
   useEffect(() => {
@@ -280,7 +319,7 @@ export function FullscreenViewer({
             <ZoomOut className="size-4" />
           </Button>
           <span className="text-white text-xs tabular-nums w-12 text-center">
-            {Math.round(scale * 100)}%
+            {Math.round(view.scale * 100)}%
           </span>
           <Button variant="ghost" size="icon" className="text-white hover:bg-white/20" onClick={zoomIn} aria-label="放大">
             <ZoomIn className="size-4" />
@@ -294,15 +333,15 @@ export function FullscreenViewer({
       {/* 画布 */}
       <Stage
         ref={stageRef as never}
-        width={stageSize.w}
-        height={stageSize.h}
+        width={view.stageSize.w}
+        height={view.stageSize.h}
         draggable
-        x={pos.x}
-        y={pos.y}
-        scaleX={scale}
-        scaleY={scale}
+        x={view.pos.x}
+        y={view.pos.y}
+        scaleX={view.scale}
+        scaleY={view.scale}
         onDragEnd={(e) => {
-          setPos({ x: e.target.x(), y: e.target.y() })
+          dispatchView({ type: "setPos", x: e.target.x(), y: e.target.y() })
         }}
         onWheel={(e) => {
           e.evt.preventDefault()
@@ -310,8 +349,8 @@ export function FullscreenViewer({
         }}
       >
         <Layer>
-          {img && (
-            <KonvaImage image={img} x={0} y={0} width={imgSize.w} height={imgSize.h} />
+          {imgLoad.img && (
+            <KonvaImage image={imgLoad.img} x={0} y={0} width={imgLoad.imgSize.w} height={imgLoad.imgSize.h} />
           )}
         </Layer>
       </Stage>
@@ -324,7 +363,7 @@ export function FullscreenViewer({
       >
         {meta ? (
           <div className="space-y-0.5 tabular-nums">
-            <div>{imgSize.w || meta.width} × {imgSize.h || meta.height} px</div>
+            <div>{imgLoad.imgSize.w || meta.width} × {imgLoad.imgSize.h || meta.height} px</div>
             <div>{formatSize(meta.size)}</div>
             <div>{meta.format}</div>
           </div>
@@ -334,17 +373,17 @@ export function FullscreenViewer({
       </div>
 
       {/* 加载中 */}
-      {loading && (
+      {imgLoad.loading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center text-white/60 text-sm">
           加载中…
         </div>
       )}
 
       {/* 加载失败 */}
-      {loadError && (
+      {imgLoad.loadError && (
         <div className="absolute inset-0 z-10 flex items-center justify-center">
           <div className="bg-destructive/90 text-white text-sm px-4 py-2 rounded-md">
-            {loadError}
+            {imgLoad.loadError}
           </div>
         </div>
       )}

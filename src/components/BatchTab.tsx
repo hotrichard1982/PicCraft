@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useReducer } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { open } from "@tauri-apps/plugin-dialog"
@@ -19,6 +19,37 @@ interface BatchProgress {
 
 const STORAGE_KEY_OUTPUT = "piccraft-batch-output"
 
+// 批处理运行时状态
+interface BatchRunState {
+  processing: boolean
+  progress: BatchProgress
+  errors: string[]
+  listenFailed: boolean
+}
+
+type BatchRunAction =
+  | { type: "start" }
+  | { type: "setProgress"; progress: BatchProgress; error?: string }
+  | { type: "listenFailed" }
+  | { type: "finish" }
+
+function batchRunReducer(state: BatchRunState, action: BatchRunAction): BatchRunState {
+  switch (action.type) {
+    case "start":
+      return { ...state, processing: true, errors: [], listenFailed: false, progress: { current: 0, total: 0, filename: "", error: null } }
+    case "setProgress":
+      return {
+        ...state,
+        progress: action.progress,
+        errors: action.error ? [...state.errors, `${action.progress.filename}: ${action.error}`] : state.errors,
+      }
+    case "listenFailed":
+      return { ...state, listenFailed: true }
+    case "finish":
+      return { ...state, processing: false }
+  }
+}
+
 export function BatchTab() {
   const queue = useAppStore((s) => s.queue)
   const updateQueueItem = useAppStore((s) => s.updateQueueItem)
@@ -26,11 +57,10 @@ export function BatchTab() {
   const [outputDir, setOutputDir] = useState("")
   const [targetWidth, setTargetWidth] = useState("1000")
   const [quality, setQuality] = useState("60")
-  const [processing, setProcessing] = useState(false)
-  const [progress, setProgress] = useState<BatchProgress>({ current: 0, total: 0, filename: "", error: null })
+  const [run, dispatchRun] = useReducer(batchRunReducer, {
+    processing: false, progress: { current: 0, total: 0, filename: "", error: null }, errors: [], listenFailed: false,
+  })
   const [statusText, setStatusText] = useState("准备就绪")
-  const [errors, setErrors] = useState<string[]>([])
-  const [listenFailed, setListenFailed] = useState(false)
 
   // 启动时从 localStorage 恢复上次的 outputDir
   useEffect(() => {
@@ -65,9 +95,7 @@ export function BatchTab() {
       setStatusText("请先选择输出文件夹")
       return
     }
-    setProcessing(true)
-    setErrors([])
-    setListenFailed(false)
+    dispatchRun({ type: "start" })
     setStatusText("正在处理...")
 
     // 把队列全部标记为 processing
@@ -77,9 +105,8 @@ export function BatchTab() {
     try {
       unlisten = await listen<BatchProgress>("batch-progress", (event) => {
         const p = event.payload
-        setProgress(p)
+        dispatchRun({ type: "setProgress", progress: p, error: p.error ?? undefined })
         if (p.error) {
-          setErrors((prev) => [...prev, `${p.filename}: ${p.error}`])
           // 标记该文件失败
           const item = queue.find((q) => q.path.endsWith(p.filename) || q.filename === p.filename)
           if (item) updateQueueItem(item.path, { status: "failed", error: p.error })
@@ -91,7 +118,7 @@ export function BatchTab() {
         setStatusText(`处理中... ${p.current}/${p.total}`)
       })
     } catch (listenErr) {
-      setListenFailed(true)
+      dispatchRun({ type: "listenFailed" })
       console.error("batch-progress listen error:", listenErr)
     }
 
@@ -106,7 +133,7 @@ export function BatchTab() {
     } catch (e) {
       setStatusText(`批量处理失败：${e}`)
     } finally {
-      setProcessing(false)
+      dispatchRun({ type: "finish" })
       unlisten?.()
     }
   }, [queue, outputDir, targetWidth, quality, updateQueueItem])
@@ -131,7 +158,7 @@ export function BatchTab() {
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">输出目录</Label>
             <div className="flex items-center gap-2">
               <Input value={outputDir} readOnly placeholder="选择输出文件夹" className="text-xs flex-1" />
-              <Button variant="outline" size="sm" onClick={selectOutput} disabled={processing} className="shrink-0">
+              <Button variant="outline" size="sm" onClick={selectOutput} disabled={run.processing} className="shrink-0">
                 <FolderOpen className="size-3" />
               </Button>
             </div>
@@ -153,7 +180,7 @@ export function BatchTab() {
                   value={targetWidth}
                   onChange={(e) => setTargetWidth(e.target.value)}
                   className="h-8 text-xs w-20"
-                  disabled={processing}
+                  disabled={run.processing}
                 />
                 <span className="text-xs text-muted-foreground">px</span>
               </div>
@@ -166,7 +193,7 @@ export function BatchTab() {
                   value={quality}
                   onChange={(e) => setQuality(e.target.value)}
                   className="h-8 text-xs w-16"
-                  disabled={processing}
+                  disabled={run.processing}
                 />
                 <span className="text-xs text-muted-foreground">1-100</span>
               </div>
@@ -181,37 +208,37 @@ export function BatchTab() {
               className="w-full"
               size="lg"
               onClick={handleStart}
-              disabled={processing || queue.length === 0 || !outputDir}
+              disabled={run.processing || queue.length === 0 || !outputDir}
             >
               <Play className="size-4 mr-2" />
-              {processing ? "处理中..." : `开始处理（${queue.length} 张）`}
+              {run.processing ? "处理中..." : `开始处理（${queue.length} 张）`}
             </Button>
-            {processing && progress.total > 0 && (
+            {run.processing && run.progress.total > 0 && (
               <div className="space-y-1">
                 <div className="h-2 bg-muted rounded-full overflow-hidden">
                   <div
                     className="h-full bg-primary transition-all duration-300 rounded-full"
-                    style={{ width: `${(progress.current / progress.total) * 100}%` }}
+                    style={{ width: `${(run.progress.current / run.progress.total) * 100}%` }}
                   />
                 </div>
                 <p className="text-xs text-muted-foreground text-center">{statusText}</p>
               </div>
             )}
-            {listenFailed && processing && (
+            {run.listenFailed && run.processing && (
               <p className="text-xs text-center text-amber-600 dark:text-amber-400">
                 进度监听不可用，处理仍在后台进行
               </p>
             )}
-            {!processing && <p className="text-xs text-muted-foreground text-center">{statusText}</p>}
-            {errors.length > 0 && (
+            {!run.processing && <p className="text-xs text-muted-foreground text-center">{statusText}</p>}
+            {run.errors.length > 0 && (
               <div className="text-xs p-3 rounded bg-destructive/10 text-destructive max-h-32 overflow-y-auto">
-                <p className="font-semibold mb-1">处理失败 ({errors.length})：</p>
-                {errors.slice(0, 10).map((e, i) => (
+                <p className="font-semibold mb-1">处理失败 ({run.errors.length})：</p>
+                {run.errors.slice(0, 10).map((e, i) => (
                   <p key={i} className="truncate">
                     {e}
                   </p>
                 ))}
-                {errors.length > 10 && <p>...还有 {errors.length - 10} 条错误</p>}
+                {run.errors.length > 10 && <p>...还有 {run.errors.length - 10} 条错误</p>}
               </div>
             )}
           </div>

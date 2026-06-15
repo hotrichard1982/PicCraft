@@ -36,3 +36,5 @@ release-assets/
 .qoderignore
 pnpm-workspace.yaml
 agent.md
+skills/
+.agent/
