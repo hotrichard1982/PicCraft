@@ -1,72 +1,116 @@
-import { useCallback } from "react"
+import { useCallback, useState } from "react"
 import { openUrl } from "@tauri-apps/plugin-opener"
-import { Settings, HelpCircle, Info, Check } from "lucide-react"
+import { Settings, HelpCircle, Info, Check, Save } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
-} from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/store"
 
 // ─── 5 个支持的图片格式（CONTEXT.md §8）───
 const FORMATS = ["jpg", "jpeg", "png", "webp", "bmp"] as const
+
+// ─── 侧边栏导航项 ───
+type SubTab = "settings" | "help" | "about"
+
+const NAV_ITEMS: Array<{ key: SubTab; label: string; icon: React.ReactNode }> = [
+  { key: "settings", label: "设置", icon: <Settings className="size-4" /> },
+  { key: "help", label: "帮助", icon: <HelpCircle className="size-4" /> },
+  { key: "about", label: "关于", icon: <Info className="size-4" /> },
+]
 
 // ─── 子 Tab 1：设置 ───
 function SettingsSubTab() {
   const fileAssoc = useAppStore((s) => s.settings.fileAssoc)
   const setSettings = useAppStore((s) => s.setSettings)
 
-  const toggle = useCallback(
-    (ext: string, checked: boolean) => {
-      const next = checked
-        ? Array.from(new Set([...fileAssoc, ext]))
-        : fileAssoc.filter((e) => e !== ext)
-      setSettings({ fileAssoc: next })
-    },
-    [fileAssoc, setSettings],
-  )
+  // 本地暂存，点击保存后才写入 store
+  const [draft, setDraft] = useState<Set<string>>(new Set(fileAssoc))
+  const [saved, setSaved] = useState(false)
+
+  const toggle = useCallback((ext: string) => {
+    setSaved(false)
+    setDraft((prev) => {
+      const next = new Set(prev)
+      if (next.has(ext)) next.delete(ext)
+      else next.add(ext)
+      return next
+    })
+  }, [])
+
+  const handleSave = useCallback(() => {
+    setSettings({ fileAssoc: Array.from(draft) })
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }, [draft, setSettings])
+
+  const isDirty = draft.size !== fileAssoc.length || [...draft].some((e) => !fileAssoc.includes(e))
 
   return (
-    <div className="flex justify-center pt-8 px-6">
+    <div className="flex justify-center pt-8 px-6 pb-8">
       <Card className="w-full max-w-lg">
-        <CardContent className="pt-6 space-y-4">
-          <div>
-            <h3 className="text-sm font-semibold">关联图片格式</h3>
-            <p className="text-xs text-muted-foreground mt-1">
-              勾选要关联给 Windows 的图片格式（在文件资源管理器双击图片时由 PicCraft 打开）。
+        <CardContent className="pt-6 space-y-5">
+          {/* 标题区 */}
+          <div className="space-y-1">
+            <h3 className="text-base font-semibold flex items-center gap-2">
+              <Settings className="size-4 text-muted-foreground" />
+              关联图片格式
+            </h3>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              勾选要关联给 Windows 的图片格式，勾选后在文件资源管理器双击图片时由 PicCraft 打开。
             </p>
           </div>
 
           <Separator />
 
-          <div className="space-y-2">
+          {/* 格式列表 */}
+          <div className="grid grid-cols-2 gap-2">
             {FORMATS.map((ext) => {
-              const checked = fileAssoc.includes(ext)
+              const checked = draft.has(ext)
               return (
                 <label
                   key={ext}
-                  onClick={() => toggle(ext, !checked)}
-                  className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent cursor-pointer select-none"
+                  onClick={() => toggle(ext)}
+                  className={
+                    "flex items-center gap-3 px-4 py-3 rounded-lg border transition-all cursor-pointer select-none " +
+                    (checked
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:border-muted-foreground/40")
+                  }
                 >
                   <span
-                    role="checkbox"
-                    aria-checked={checked}
                     className={
-                      "size-4 rounded border flex items-center justify-center transition-colors " +
+                      "size-5 rounded border-2 flex items-center justify-center transition-colors " +
                       (checked
                         ? "bg-primary border-primary text-primary-foreground"
-                        : "border-input bg-background")
+                        : "border-muted-foreground/40")
                     }
                   >
                     {checked && <Check className="size-3" strokeWidth={3} />}
                   </span>
-                  <span className="text-sm">.{ext}</span>
+                  <span className="text-sm font-medium">.{ext}</span>
                 </label>
               )
             })}
+          </div>
+
+          <Separator />
+
+          {/* 保存按钮 + 反馈 */}
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={handleSave}
+              disabled={!isDirty}
+              className="flex-1"
+            >
+              <Save className="size-4 mr-2" />
+              保存设置
+            </Button>
+            {saved && (
+              <span className="text-sm text-green-600 dark:text-green-400 flex items-center gap-1 animate-in fade-in slide-in-from-left-2 duration-300">
+                <Check className="size-4" />
+                已保存
+              </span>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -256,50 +300,37 @@ function AboutSubTab() {
   )
 }
 
-// ─── 主视图：3 个子 Tab ───
+// ─── 主视图：侧边栏布局 ───
 export function SettingsView() {
-  return (
-    <div className="h-full flex flex-col">
-      <Tabs
-        defaultValue="settings"
-        className="h-full flex flex-col"
-      >
-        <div className="flex justify-center border-b bg-background px-4">
-          <TabsList className="h-10 -mb-px">
-            <TabsTrigger value="settings" className="px-5 gap-1.5">
-              <Settings className="size-3.5" />
-              设置
-            </TabsTrigger>
-            <TabsTrigger value="help" className="px-5 gap-1.5">
-              <HelpCircle className="size-3.5" />
-              帮助
-            </TabsTrigger>
-            <TabsTrigger value="about" className="px-5 gap-1.5">
-              <Info className="size-3.5" />
-              关于
-            </TabsTrigger>
-          </TabsList>
-        </div>
+  const [active, setActive] = useState<SubTab>("settings")
 
-        <TabsContent
-          value="settings"
-          className="flex-1 min-h-0 overflow-auto m-0 data-[state=inactive]:hidden"
-        >
-          <SettingsSubTab />
-        </TabsContent>
-        <TabsContent
-          value="help"
-          className="flex-1 min-h-0 overflow-auto m-0 data-[state=inactive]:hidden"
-        >
-          <HelpSubTab />
-        </TabsContent>
-        <TabsContent
-          value="about"
-          className="flex-1 min-h-0 overflow-auto m-0 data-[state=inactive]:hidden"
-        >
-          <AboutSubTab />
-        </TabsContent>
-      </Tabs>
+  return (
+    <div className="h-full flex">
+      {/* 左侧导航栏 */}
+      <nav className="w-44 shrink-0 border-r bg-muted/30 py-4 px-2 flex flex-col gap-1">
+        {NAV_ITEMS.map((item) => (
+          <button
+            key={item.key}
+            onClick={() => setActive(item.key)}
+            className={
+              "flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors text-left " +
+              (active === item.key
+                ? "bg-primary text-primary-foreground font-medium"
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground")
+            }
+          >
+            {item.icon}
+            {item.label}
+          </button>
+        ))}
+      </nav>
+
+      {/* 右侧内容区 */}
+      <div className="flex-1 min-w-0 overflow-auto">
+        {active === "settings" && <SettingsSubTab />}
+        {active === "help" && <HelpSubTab />}
+        {active === "about" && <AboutSubTab />}
+      </div>
     </div>
   )
 }

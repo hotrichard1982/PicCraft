@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
+import { Slider } from "@/components/ui/slider"
 import { CropCanvas, type CropRect } from "@/components/CropCanvas"
 import { useAppStore } from "@/store"
 import { FolderOpen, RotateCcw, Save, Download, ListPlus } from "lucide-react"
@@ -423,10 +424,23 @@ export function SingleTab() {
               <span className="text-xs">保持原图比例</span>
             </label>
 
-            <div className="flex items-center gap-2">
-              <Label className="text-xs w-8">质量</Label>
-              <Input type="number" min="1" max="100" value={edit.quality} onChange={(e) => dispatchEdit({ type: "setQuality", value: e.target.value })} className="h-8 text-xs w-16" disabled={!img.hasImage} />
-              <span className="text-xs text-muted-foreground">1-100</span>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">质量</Label>
+                <span className="text-xs font-mono text-muted-foreground">{edit.quality}</span>
+              </div>
+              <Slider
+                min={0}
+                max={100}
+                step={1}
+                value={parseInt(edit.quality) || 85}
+                onValueChange={(v) => dispatchEdit({ type: "setQuality", value: String(v) })}
+                disabled={!img.hasImage}
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground">
+                <span>质量最差</span>
+                <span>质量最高</span>
+              </div>
             </div>
 
             <Button size="sm" className="w-full" disabled={!img.hasImage} onClick={handleResize}>应用缩放</Button>
