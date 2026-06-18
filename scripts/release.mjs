@@ -78,7 +78,18 @@ try {
 } catch {
   console.log(`Tag ${tag} 可能已存在，继续...`)
 }
-run("git push origin main --tags")
+try {
+  run("git push origin main --tags")
+} catch {
+  try {
+    // HTTPS 推送失败时切换 SSH
+    run('git remote set-url origin git@github.com:hotrichard1982/PicCraft.git')
+    run("git push origin main --tags")
+  } catch {
+    console.warn('⚠️  git push 失败（网络问题），Release 已通过 API 创建')
+    console.warn('   后续手动执行: git push origin main --tags')
+  }
+}
 
 // ─── 5. 创建 Release 并上传 ───
 console.log("\n=== 5/5 创建 GitHub Release ===")
