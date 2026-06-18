@@ -100,7 +100,7 @@ node scripts/release.mjs
 ### 仅前端开发（不启动 Rust 后端）
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 ---
