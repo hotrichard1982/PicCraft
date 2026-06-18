@@ -35,6 +35,6 @@ graphify-out/
 release-assets/
 .qoderignore
 pnpm-workspace.yaml
-agent.md
+AGENTS.md
 skills/
 .agent/

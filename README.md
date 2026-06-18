@@ -11,11 +11,16 @@
 ## 功能
 
 ### 浏览视图
+- **侧边栏目录树**：左侧 240px（可拖拽 180~480px），完整文件系统树，懒加载子目录，可收起。自动定位到当前目录并高亮。
 - **缩略图网格**：CSS Grid 自适应布局，默认 300px 缩略图
-- **缩略图懒加载**：IntersectionObserver + Rust 端 `make_thumbnail`（Triangle 滤镜），200px 预加载余量
-- **多选交互**：Ctrl+点 / Shift+范围选 / 鼠标框选（rubber band）
+- **缩略图懒加载 + 加速**：IntersectionObserver + Rust 端快速解码（JPEG 按比例 1/2/4/8 缩放解码，跳过整图解码）+ 磁盘缓存（二次打开秒出）
+- **多选交互**：Ctrl+点 / Shift+范围选 / 鼠标框选（rubber band，可从缩略图上方开始框选）
 - **缩略图大小调节**：`Ctrl+滚轮` / `Ctrl+加号/减号`，步长 10%，范围 100-800px
-- **全屏看图**：Konva 画布渲染，←→/Space 翻页，`+ - 0 F` 缩放，`E` 直接进入编辑
+- **全屏看图**：Konva 画布渲染，←→/Space 翻页（循环），`+ - 0 F` 缩放，`R` 旋转，`E` 跳转编辑
+- **底部工具栏**：关闭 / 旋转 / 翻页 / 缩放 / 适应窗口 / 编辑，鼠标静止 1.5 秒自动隐藏
+- **首次使用提示**：进入全屏时底部淡出快捷键提示条，5 秒后自动消失
+- **左右半区点击翻页**：点击画布左 35% = 上一张，右 35% = 下一张
+- **深浅主题适配**：全屏背景和工具栏颜色跟随系统/手动切换的明暗主题
 
 ### 队列系统
 - 浏览视图右键选中图 → "加入队列"（含 N 张提示）→ 自动切到批量视图
@@ -41,14 +46,20 @@
 
 ### 设置视图
 - 3 子 Tab：设置 / 帮助 / 关于
-- **设置**：图片格式关联勾选管理（UI 已就绪，注册表写入可用）
+- **设置**：图片格式关联勾选管理（注册表写入可用）
 - **帮助**：软件使用教程（折叠面板）
 - **关于**：版本号、技术栈、开源协议、公司信息
 
+### 文件关联
+- **启动自动检查**：软件启动 1.5 秒后后台检查默认图片打开方式是否为 PicCraft
+- **自动恢复**：被其他软件（如 WPS）篡改时弹出提示，一键恢复为 PicCraft
+- 支持 `open`（双击查看）和 `edit`（右键编辑）两个 verb
+
 ### 启动路由
 - 冷启动 → 浏览视图（加载上次目录）
-- 双击 .jpg → 浏览视图（全屏看图模式，定位该图）
+- 双击 .jpg → 浏览视图（全屏看图模式 + 定位该图）
 - 右键"用图轻剪编辑" → 单图编辑视图
+- `single-instance` 插件：第二次启动自动转发参数给已运行实例
 
 ---
 
@@ -78,6 +89,14 @@ pnpm tauri build
 - `src-tauri/target/release/bundle/msi/` — MSI 安装包
 - `src-tauri/target/release/bundle/nsis/` — NSIS 安装包
 
+### 一键发布（需要 `gh` CLI）
+
+```bash
+node scripts/release.mjs
+```
+
+自动打 tag → 编译 → 创建 GitHub Release → 上传 exe / MSI / NSIS。
+
 ### 仅前端开发（不启动 Rust 后端）
 
 ```bash
@@ -92,17 +111,19 @@ npm run dev
 PicCraft/
 ├── src/                        # React 前端（TypeScript）
 │   ├── main.tsx                # 入口
-│   ├── App.tsx                 # 主应用（4 视图切换器 + 启动路由）
+│   ├── App.tsx                 # 主应用（4 视图切换器 + 启动路由 + 文件关联检查）
 │   ├── index.css               # Tailwind + shadcn 主题变量
 │   ├── lib/utils.ts            # cn() 工具函数
 │   ├── hooks/use-theme.ts      # 明暗主题切换
-│   ├── store/index.ts          # Zustand 全局状态（view/folder/queue/settings）
+│   ├── store/index.ts          # Zustand 全局状态（view/folder/queue/settings/browseTargetFile）
 │   ├── views/
-│   │   ├── BrowseView.tsx      # 浏览视图（缩略图网格 + 状态栏 + 全屏入口）
+│   │   ├── BrowseView.tsx      # 浏览视图（侧边栏 + 缩略图网格 + 状态栏 + 全屏入口）
 │   │   └── SettingsView.tsx    # 设置视图（3 子 Tab）
 │   └── components/
 │       ├── Header.tsx          # Logo + 标题 + 主题切换
-│       ├── FullscreenViewer.tsx# 全屏看图（Konva + 工具条 + 快捷键）
+│       ├── Sidebar.tsx         # 侧边栏容器（可收起、可拖拽宽度）
+│       ├── DirTree.tsx         # 目录树组件（懒加载、自动定位）
+│       ├── FullscreenViewer.tsx# 全屏看图（Konva + 底部工具栏 + 旋转 + 循环翻页）
 │       ├── ThumbnailGrid.tsx   # 缩略图网格（懒加载 + 多选 + 框选 + 右键菜单）
 │       ├── StatusBar.tsx       # 底部状态栏
 │       ├── QueuePanel.tsx      # 队列面板（仅批量视图）
@@ -116,10 +137,12 @@ PicCraft/
 │   ├── capabilities/           # Tauri v2 权限配置
 │   └── src/
 │       ├── main.rs             # Windows 入口
-│       ├── lib.rs              # Tauri Builder + 启动参数 + single-instance
-│       └── image_ops.rs        # 图片处理命令（12 个 tauri::command）
+│       ├── lib.rs              # Tauri Builder + 启动参数 + single-instance（15 个命令注册）
+│       └── image_ops.rs        # 图片处理 + 文件关联 + 目录树（15 个 tauri::command）
 ├── public/logo.png             # App Logo
-├── scripts/copy-dist.mjs       # Windows 构建辅助脚本
+├── scripts/
+│   ├── copy-dist.mjs           # Windows 构建辅助脚本
+│   └── release.mjs             # 一键发布脚本（编译 + tag + gh release）
 ├── AGENTS.md                   # AI 开发助手指南
 ├── CONTEXT.md                  # 领域术语表
 └── docs/
@@ -138,8 +161,8 @@ PicCraft/
 | UI 样式 | Tailwind CSS + shadcn/ui |
 | 画布交互 | Konva.js (react-konva)，分离渲染层 |
 | 状态管理 | Zustand（4 视图共享 + tauri-plugin-store 持久化） |
-| 图片处理 | Rust `image` crate (Lanczos3) + `imagequant` (PNG 调色板量化) |
-| 异步批处理 | tokio |
+| 图片处理 | Rust `image` crate (Lanczos3) + `jpeg-decoder`（快速缩放解码）|
+| 缩略图缓存 | 磁盘缓存到 `%TEMP%/piccraft_thumbs/` |
 | 文件关联 | Rust `winreg` crate（Windows 注册表） |
 
 ---
@@ -166,11 +189,12 @@ PicCraft/
 ### 全屏看图
 | 快捷键 | 功能 |
 |--------|------|
-| `← / →` | 上一张 / 下一张 |
+| `← / →` | 上一张 / 下一张（循环） |
 | `Space` | 下一张 |
 | `+ / -` | 放大 / 缩小 |
 | `0` | 实际大小 |
 | `F` | 适应窗口 |
+| `R` | 顺时针旋转 90° |
 | `E` | 进入单图编辑 |
 | `Esc` | 退出全屏 |
 

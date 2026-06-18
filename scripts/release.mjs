@@ -82,8 +82,10 @@ try {
   run("git push origin main --tags")
 } catch {
   try {
-    // HTTPS 推送失败时切换 SSH
-    run('git remote set-url origin git@github.com:hotrichard1982/PicCraft.git')
+    // HTTPS 推送失败时动态转换当前 remote URL 为 SSH 格式
+    const currentUrl = runCapture('git remote get-url origin')
+    const sshUrl = currentUrl.replace(/^https:\/\/github\.com\//, 'git@github.com:')
+    run(`git remote set-url origin ${sshUrl}`)
     run("git push origin main --tags")
   } catch {
     console.warn('⚠️  git push 失败（网络问题），Release 已通过 API 创建')
