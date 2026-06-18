@@ -45,6 +45,7 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
   const [rubber, setRubber] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const rubberAnchorRef = useRef<{ x: number; y: number } | null>(null)
   const lastClickedIndexRef = useRef<number | null>(null)
+  const wasRubberBandRef = useRef(false)
 
   // ─── 缩略图缓存：path → base64 dataURL | "err" ───
   // 缓存按 maxWidth 分组存储，避免 thumbSize 变化时清空
@@ -212,8 +213,12 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
     const onMove = (e: MouseEvent) => {
       const anchor = rubberAnchorRef.current
       if (!anchor) return
-      const cx = e.clientX
-      const cy = e.clientY
+      const cr = containerRef.current
+      if (!cr) return
+      const crRect = cr.getBoundingClientRect()
+      // 转成容器相对坐标，和 anchor 保持一致
+      const cx = e.clientX - crRect.left + cr.scrollLeft
+      const cy = e.clientY - crRect.top + cr.scrollTop
       // 累积到 ref，不触发 re-render
       rubberStateRef.current = {
         x: Math.min(anchor.x, cx),
@@ -234,6 +239,11 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current)
         rafIdRef.current = null
+      }
+      // 标记橡胶框有效拖拽（≥4px 算有意义），防止后续 click 误选中
+      const rs = rubberStateRef.current
+      if (rs && (rs.w >= 4 || rs.h >= 4)) {
+        wasRubberBandRef.current = true
       }
       setRubber(null)
       rubberAnchorRef.current = null
@@ -327,6 +337,10 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
   const handleClick = useCallback(
     (e: React.MouseEvent, path: string, index: number) => {
       if (rubber) return
+      if (wasRubberBandRef.current) {
+        wasRubberBandRef.current = false
+        return
+      }
       if (e.ctrlKey || e.metaKey) {
         toggleSelected(path, true)
         lastClickedIndexRef.current = index
@@ -346,8 +360,6 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (e.button !== 0) return
-      const target = e.target as HTMLElement
-      if (target.closest("[data-thumb-item]")) return
       if (!e.shiftKey && !e.ctrlKey) {
         clearSelected()
       }
@@ -359,6 +371,7 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
       rubberAnchorRef.current = { x, y }
       const initial = { x, y, w: 0, h: 0 }
       rubberStateRef.current = initial
+      wasRubberBandRef.current = false
       setRubber(initial)
     },
     [clearSelected],

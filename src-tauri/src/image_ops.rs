@@ -42,6 +42,19 @@ pub struct ImageInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DirInfo {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FileAssocStatus {
+    pub open_ok: bool,
+    pub current_open_cmd: Option<String>,
+    pub expected_open_cmd: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileMeta {
     pub size: u64,
     pub created_at: Option<u64>,
@@ -495,18 +508,191 @@ pub fn read_dir(folder: String) -> Result<Vec<ImageInfo>, String> {
     Ok(result)
 }
 
+/// 列出子目录（供侧边栏树使用）
+/// - path = None 或 ""：返回根目录（Windows 上为驱动器列表）
+/// - path = 具体路径：返回该目录下的子目录
+#[tauri::command]
+pub fn list_subdirs(path: Option<String>) -> Result<Vec<DirInfo>, String> {
+    let p = path.unwrap_or_default();
+    if p.is_empty() {
+        #[cfg(target_os = "windows")]
+        {
+            let mut drives = Vec::new();
+            for letter in 'A'..='Z' {
+                let drive = format!("{letter}:\\");
+                if Path::new(&drive).exists() {
+                    drives.push(DirInfo {
+                        name: format!("{letter}:"),
+                        path: drive,
+                    });
+                }
+            }
+            return Ok(drives);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let dir = Path::new("/");
+            let entries: Vec<_> = std::fs::read_dir(dir)
+                .map_err(|e| format!("读取根目录失败: {e}"))?
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .map(|p| DirInfo {
+                    name: p.file_name().unwrap_or_default().to_string_lossy().to_string(),
+                    path: p.to_string_lossy().to_string(),
+                })
+                .collect();
+            return Ok(entries);
+        }
+    }
+    let dir = Path::new(&p);
+    if !dir.is_dir() {
+        return Err(format!("不是目录: {p}"));
+    }
+    let mut entries: Vec<_> = std::fs::read_dir(dir)
+        .map_err(|e| format!("读取目录失败: {e}"))?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .map(|p| DirInfo {
+            name: p.file_name().unwrap_or_default().to_string_lossy().to_string(),
+            path: p.to_string_lossy().to_string(),
+        })
+        .collect();
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(entries)
+}
+
 /// 生成缩略图（PNG → base64 字符串返回）
+///
+/// 性能优化：
+/// 1. 磁盘缓存：首次生成后缓存到 temp 目录，后续直接返回
+/// 2. JPEG 快速解码：用 jpeg-decoder 的 set_scale 跳过整图解码
 #[tauri::command]
 pub fn make_thumbnail(path: String, max_width: u32) -> Result<String, String> {
     if max_width == 0 { return Err("max_width 必须大于 0".to_string()); }
     let max_width = max_width.min(THUMBNAIL_MAX_WIDTH);
     check_file_size(&path)?;
-    let img = image::open(&path).map_err(|e| format!("无法打开图片: {e}"))?;
+
+    // ─── 尝试磁盘缓存 ───
+    let cache_key = {
+        use std::hash::{Hash, Hasher};
+        let mut s = std::collections::hash_map::DefaultHasher::new();
+        path.hash(&mut s);
+        max_width.hash(&mut s);
+        s.finish()
+    };
+    let cache_dir = std::env::temp_dir().join("piccraft_thumbs");
+    let cache_file = cache_dir.join(format!("{cache_key:x}.png"));
+
+    // 如果缓存命中，直接返回
+    if cache_file.exists() {
+        if let Ok(buf) = std::fs::read(&cache_file) {
+            log::info!("[thumb] cache HIT  {path}");
+            return Ok(base64::engine::general_purpose::STANDARD.encode(&buf));
+        }
+    }
+
+    let png_bytes: Vec<u8> = {
+        let p = Path::new(&path);
+        let ext = p.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase())
+            .unwrap_or_default();
+
+        // JPEG 走快速路径：按比例降低分辨率解码
+        if matches!(ext.as_str(), "jpg" | "jpeg") {
+            match make_jpeg_thumbnail_fast(p, max_width) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    log::warn!("[thumb] JPEG fast path failed, falling back: {e}");
+                    make_thumbnail_fallback(p, max_width)?
+                }
+            }
+        } else {
+            make_thumbnail_fallback(p, max_width)?
+        }
+    };
+
+    // ─── 写入磁盘缓存 ───
+    if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+        log::warn!("[thumb] 创建缓存目录失败: {e}");
+    } else if let Err(e) = std::fs::write(&cache_file, &png_bytes) {
+        log::warn!("[thumb] 写入缓存失败: {e}");
+    } else {
+        log::info!("[thumb] cache WRITE {path}");
+    }
+
+    Ok(base64::engine::general_purpose::STANDARD.encode(&png_bytes))
+}
+
+/// JPEG 快速解码路径：用 jpeg-decoder 的 scale 缩小分辨率解码
+fn make_jpeg_thumbnail_fast(path: &Path, max_width: u32) -> Result<Vec<u8>, String> {
+    use jpeg_decoder::Decoder;
+    use std::io::BufReader;
+
+    // 第一步：读取头部获取原始尺寸
+    let file = std::fs::File::open(path).map_err(|e| format!("打开文件失败: {e}"))?;
+    let mut reader = BufReader::new(file);
+    let mut decoder = Decoder::new(&mut reader);
+    decoder.read_info().map_err(|e| format!("读取 JPEG 信息失败: {e}"))?;
+    let info = decoder.info().ok_or("无法获取 JPEG 尺寸信息")?;
+    let (orig_w, orig_h) = (info.width as u32, info.height as u32);
+    drop(decoder);
+
+    // 计算缩放后的目标尺寸
+    // jpeg-decoder 的 scale 支持 1/2/4/8 整数倍缩放
+    let longest = orig_w.max(orig_h);
+    let scale_factor: u32 = if longest <= max_width {
+        1
+    } else {
+        let ratio = longest / max_width;
+        if ratio >= 8 { 8 }
+        else if ratio >= 4 { 4 }
+        else if ratio >= 2 { 2 }
+        else { 1 }
+    };
+    let target_w = (orig_w + scale_factor - 1) / scale_factor;
+    let target_h = (orig_h + scale_factor - 1) / scale_factor;
+
+    // 第二步：用 scale 按目标尺寸解码
+    let file = std::fs::File::open(path).map_err(|e| format!("打开文件失败: {e}"))?;
+    let mut reader = BufReader::new(file);
+    let mut decoder = Decoder::new(&mut reader);
+    // scale 让解码器以接近目标尺寸的分辨率解码，大幅减少像素量
+    let (decoded_w, decoded_h) = decoder
+        .scale(target_w.max(1) as u16, target_h.max(1) as u16)
+        .map_err(|e| format!("JPEG scale 设置失败: {e}"))?;
+    let pixels = decoder.decode().map_err(|e| format!("JPEG 解码失败: {e}"))?;
+
+    let img_buffer = image::RgbImage::from_raw(decoded_w as u32, decoded_h as u32, pixels)
+        .ok_or("JPEG 解码像素数据格式异常")?;
+
+    let img = image::DynamicImage::from(img_buffer);
+    let (img_w, img_h) = (img.width(), img.height());
+
+    if img_w <= max_width && img_h <= max_width {
+        let mut buf = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .map_err(|e| format!("PNG 编码失败: {e}"))?;
+        Ok(buf)
+    } else {
+        let resized = img.resize(max_width, u32::MAX, FilterType::Triangle);
+        let mut buf = Vec::new();
+        resized.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .map_err(|e| format!("PNG 编码失败: {e}"))?;
+        Ok(buf)
+    }
+}
+
+/// 回退路径：用 image crate 解码整图后缩小
+fn make_thumbnail_fallback(path: &Path, max_width: u32) -> Result<Vec<u8>, String> {
+    let img = image::open(path).map_err(|e| format!("无法打开图片: {e}"))?;
     let resized = img.resize(max_width, u32::MAX, FilterType::Triangle);
     let mut buf = Vec::new();
     resized.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
         .map_err(|e| format!("PNG 编码失败: {e}"))?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(&buf))
+    Ok(buf)
 }
 
 /// 单文件元数据查询
@@ -556,7 +742,7 @@ mod file_assoc {
 
     const HKCU: RegKey = RegKey::predef(HKEY_CURRENT_USER);
 
-    fn build_command(extra_flag: Option<&str>) -> Result<String, String> {
+    pub fn build_command(extra_flag: Option<&str>) -> Result<String, String> {
         let exe = std::env::current_exe().map_err(|e| format!("获取 exe 路径失败: {e}"))?;
         let exe_str = exe.to_string_lossy();
         match extra_flag {
@@ -611,6 +797,31 @@ pub fn register_file_assoc(write_open: bool, write_edit: bool) -> Result<String,
         log_lines.push("edit verb 已删除".to_string());
     }
     Ok(log_lines.join("; "))
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub fn check_file_assoc() -> Result<FileAssocStatus, String> {
+    let expected = file_assoc::build_command(None)?;
+    let current = file_assoc::read_verb("open")?;
+    // 规范化比较：去掉路径中可能的引号/大小写差异
+    let normalize = |s: &str| s.to_lowercase().replace('"', "").trim().to_string();
+    let open_ok = current.as_ref().map(|c| normalize(c) == normalize(&expected)).unwrap_or(false);
+    Ok(FileAssocStatus {
+        open_ok,
+        current_open_cmd: current,
+        expected_open_cmd: expected,
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+pub fn check_file_assoc() -> Result<FileAssocStatus, String> {
+    Ok(FileAssocStatus {
+        open_ok: true,
+        current_open_cmd: None,
+        expected_open_cmd: String::new(),
+    })
 }
 
 #[cfg(not(target_os = "windows"))]

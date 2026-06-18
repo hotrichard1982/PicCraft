@@ -74,6 +74,27 @@
 - 仅在知识图谱工具无法满足需求时，再回退到传统的文件搜索（Grep、Glob 等）。
 - 修改代码后，按需运行 `npx codegraph sync` 增量更新索引，大改动后运行 `npx codegraph index --force` 全量重建。
 
+## 6. 发布流程
+
+当用户要求"提交到 GitHub / 编译 exe / 上传 release"时，执行以下流程：
+
+```
+1. git add → git commit（遵循 Conventional Commits）
+2. git tag vYYYYMMDD（按日期命名）
+3. git push origin main --tags
+4. node scripts/copy-dist.mjs  → 编译 exe + 安装包
+5. gh release create vYYYYMMDD ./src-tauri/target/release/piccarft.exe ...
+```
+
+一键发布（需 `gh` CLI）：
+```
+node scripts/release.mjs
+```
+
+前提条件：
+- GitHub CLI (`gh`) 已安装且 `gh auth login` 已登录
+- 所有变更已提交
+
 ***
 
 **这些准则生效的标志：** diff 中不必要的改动更少，因过度复杂导致的重写更少，澄清问题出现在实现之前而非犯错之后。

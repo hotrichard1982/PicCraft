@@ -33,6 +33,8 @@ interface AppState extends PersistedState {
   currentFolder: string | null
   /** 当前浏览视图下选中的图片（多选）*/
   selected: Set<string>
+  /** 双击/启动时指定在浏览视图中进入全屏的目标文件 */
+  browseTargetFile: string | null
   /** 待处理队列 */
   queue: QueueItem[]
   /** 单图编辑视图的当前文件（启动参数或用户选图时设置）*/
@@ -49,6 +51,7 @@ interface AppState extends PersistedState {
   setSelected: (paths: Set<string>) => void
   toggleSelected: (path: string, additive: boolean) => void
   clearSelected: () => void
+  setBrowseTargetFile: (file: string | null) => void
   setSettings: (patch: Partial<Settings>) => void
   /** 启动时调用：把磁盘状态 hydrate 到内存 */
   hydrate: () => Promise<void>
@@ -86,6 +89,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   selected: new Set(),
   queue: [],
   editingFile: null,
+  browseTargetFile: null,
   settings: {
     fileAssoc: ["jpg", "jpeg", "png", "webp", "bmp"],
   },
@@ -136,6 +140,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   clearSelected: () => set({ selected: new Set() }),
+
+  setBrowseTargetFile: (file) => set({ browseTargetFile: file }),
 
   setSettings: (patch) => {
     set((s) => ({ settings: { ...s.settings, ...patch } }))

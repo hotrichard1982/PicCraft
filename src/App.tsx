@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
+import { confirm } from "@tauri-apps/plugin-dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Header } from "@/components/Header"
 import { SingleTab } from "@/components/SingleTab"
@@ -20,6 +21,7 @@ function App() {
   const setView = useAppStore((s) => s.setView)
   const setCurrentFolder = useAppStore((s) => s.setCurrentFolder)
   const setEditingFile = useAppStore((s) => s.setEditingFile)
+  const setBrowseTargetFile = useAppStore((s) => s.setBrowseTargetFile)
   const hydrate = useAppStore((s) => s.hydrate)
 
   const [ready, setReady] = useState(false)
@@ -50,11 +52,14 @@ function App() {
         setView("browse")
         setCurrentFolder(args.folder)
       } else if (args?.mode === "browse" && args.file) {
-        // 双击图片：用文件所在目录
+        // 双击图片：用文件所在目录 + 标记目标文件自动全屏
         setView("browse")
         const sep = args.file.lastIndexOf("\\") >= 0 ? "\\" : "/"
         const folder = args.file.substring(0, args.file.lastIndexOf(sep))
-        if (folder) setCurrentFolder(folder)
+        if (folder) {
+          setCurrentFolder(folder)
+          setBrowseTargetFile(args.file)
+        }
       } else {
         // cold 或 browse 无指定目录：使用上次打开的目录
         setView("browse")
@@ -63,11 +68,29 @@ function App() {
       }
 
       setReady(true)
+
+      // 4) 检查文件关联状态（延迟执行，不阻塞启动）
+      setTimeout(async () => {
+        try {
+          const assoc = await invoke<{ open_ok: boolean; current_open_cmd: string | null; expected_open_cmd: string }>("check_file_assoc")
+          if (!assoc.open_ok) {
+            const fix = await confirm(
+              `图片默认打开方式被修改了！\n\n当前：${assoc.current_open_cmd ?? "无"}\n期望：${assoc.expected_open_cmd}\n\n是否恢复为图轻剪？`,
+              { title: "文件关联", kind: "warning" },
+            )
+            if (fix) {
+              await invoke("register_file_assoc", { writeOpen: true, writeEdit: true })
+            }
+          }
+        } catch (e) {
+          console.warn("[App] file assoc check failed:", e)
+        }
+      }, 1500)
     })()
     return () => {
       cancelled = true
     }
-  }, [hydrate, setView, setCurrentFolder, setEditingFile])
+  }, [hydrate, setView, setCurrentFolder, setEditingFile, setBrowseTargetFile])
 
   // ─── 监听 single-instance 转发（第二次启动）───
   useEffect(() => {
@@ -85,7 +108,10 @@ function App() {
           } else if (a.file) {
             const sep = a.file.lastIndexOf("\\") >= 0 ? "\\" : "/"
             const folder = a.file.substring(0, a.file.lastIndexOf(sep))
-            if (folder) setCurrentFolder(folder)
+            if (folder) {
+              setCurrentFolder(folder)
+              setBrowseTargetFile(a.file)
+            }
           }
         }
       })
@@ -94,7 +120,7 @@ function App() {
     return () => {
       unlisten?.()
     }
-  }, [setView, setCurrentFolder, setEditingFile])
+  }, [setView, setCurrentFolder, setEditingFile, setBrowseTargetFile])
 
   if (!ready) {
     return (
