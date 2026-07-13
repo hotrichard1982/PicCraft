@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useReducer } from "react"
+import { useState, useCallback, useEffect, useReducer, useRef } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { open, save, ask } from "@tauri-apps/plugin-dialog"
 import { Button } from "@/components/ui/button"
@@ -32,7 +32,7 @@ interface SaveResult {
 const IMG_EXTS = ["jpg", "jpeg", "png", "webp", "bmp"]
 
 // 图片文件相关状态
-interface ImageState {
+export interface ImageState {
   filePath: string
   imageInfo: ImageInfo | null
   displayPath: string | null
@@ -42,14 +42,14 @@ interface ImageState {
   isPng: boolean
 }
 
-type ImageAction =
+export type ImageAction =
   | { type: "loadImage"; path: string; info: ImageInfo }
   | { type: "setDisplayPath"; path: string }
   | { type: "setTempPath"; path: string; width: number; height: number }
   | { type: "setCropRect"; rect: CropRect | null }
   | { type: "resetToOriginal" }
 
-function imageReducer(state: ImageState, action: ImageAction): ImageState {
+export function imageReducer(state: ImageState, action: ImageAction): ImageState {
   switch (action.type) {
     case "loadImage":
       return {
@@ -75,21 +75,21 @@ function imageReducer(state: ImageState, action: ImageAction): ImageState {
 }
 
 // 编辑参数相关状态
-interface EditState {
+export interface EditState {
   width: string
   height: string
   keepAspect: boolean
   quality: string
 }
 
-type EditAction =
+export type EditAction =
   | { type: "setWidth"; value: string }
   | { type: "setHeight"; value: string }
   | { type: "setKeepAspect"; value: boolean }
   | { type: "setQuality"; value: string }
   | { type: "setSize"; width: string; height: string }
 
-function editReducer(state: EditState, action: EditAction): EditState {
+export function editReducer(state: EditState, action: EditAction): EditState {
   switch (action.type) {
     case "setWidth":
       return { ...state, width: action.value }
@@ -119,6 +119,15 @@ export function SingleTab() {
   const setEditingFile = useAppStore((s) => s.setEditingFile)
   const enqueue = useAppStore((s) => s.enqueue)
   const currentFolder = useAppStore((s) => s.currentFolder)
+
+  // ─── 目录列表缓存（避免 handleEnqueueAndNext 每次重新 read_dir）───
+  const entriesRef = useRef<ImageInfo[]>([])
+  useEffect(() => {
+    if (!currentFolder) return
+    invoke<ImageInfo[]>("read_dir", { folder: currentFolder })
+      .then((entries) => { entriesRef.current = entries })
+      .catch(() => { entriesRef.current = [] })
+  }, [currentFolder])
 
   // ─── Load Image ───
   const loadImage = useCallback(async (path: string) => {
@@ -303,7 +312,7 @@ export function SingleTab() {
     }
 
     try {
-      const entries = await invoke<ImageInfo[]>("read_dir", { folder: currentFolder })
+      const entries = entriesRef.current
       const idx = entries.findIndex((e) => e.path === img.filePath)
       const next = idx >= 0 ? entries[idx + 1] : entries[0]
       if (!next) {
@@ -430,7 +439,7 @@ export function SingleTab() {
                 <span className="text-xs font-mono text-muted-foreground">{edit.quality}</span>
               </div>
               <Slider
-                min={0}
+                min={1}
                 max={100}
                 step={1}
                 value={parseInt(edit.quality) || 85}

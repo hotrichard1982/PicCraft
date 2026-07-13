@@ -24,19 +24,19 @@ const THUMB_MAX = 800
 const THUMB_STEP = 0.1 // ±10% / 步
 
 // 目录加载相关状态合并为 reducer
-interface DirState {
+export interface DirState {
   entries: DirEntry[]
   loading: boolean
   error: string | null
 }
 
-type DirAction =
+export type DirAction =
   | { type: "loadStart" }
   | { type: "loadSuccess"; entries: DirEntry[] }
   | { type: "loadError"; error: string }
   | { type: "clear" }
 
-function dirReducer(state: DirState, action: DirAction): DirState {
+export function dirReducer(state: DirState, action: DirAction): DirState {
   switch (action.type) {
     case "loadStart":
       return { ...state, loading: true, error: null }

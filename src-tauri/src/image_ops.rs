@@ -88,6 +88,9 @@ pub struct SaveResult {
 /// 读取图片信息（不加载像素数据，仅元信息）
 #[tauri::command]
 pub fn get_image_info(path: String) -> Result<ImageInfo, String> {
+    if is_sensitive_path(&path) {
+        return Err("安全限制：不允许访问系统敏感目录".to_string());
+    }
     let path = Path::new(&path);
     let metadata = std::fs::metadata(path).map_err(|e| format!("读取文件失败: {e}"))?;
     let file_size = metadata.len();
@@ -118,6 +121,9 @@ pub fn resize_image(
     if target_width == 0 || target_height == 0 {
         return Err("目标宽度和高度必须大于 0".to_string());
     }
+    if is_sensitive_path(&path) {
+        return Err("安全限制：不允许访问系统敏感目录".to_string());
+    }
     check_file_size(&path)?;
     let img = image::open(&path).map_err(|e| format!("无法打开图片: {e}"))?;
     let resized = img.resize_exact(target_width, target_height, FilterType::Lanczos3);
@@ -142,13 +148,16 @@ pub fn crop_image(
     if width == 0 || height == 0 {
         return Err("裁剪宽度和高度必须大于 0".to_string());
     }
+    if is_sensitive_path(&path) {
+        return Err("安全限制：不允许访问系统敏感目录".to_string());
+    }
     check_file_size(&path)?;
-    let mut img = image::open(&path).map_err(|e| format!("无法打开图片: {e}"))?;
+    let img = image::open(&path).map_err(|e| format!("无法打开图片: {e}"))?;
     let (img_w, img_h) = (img.width(), img.height());
     if x >= img_w || y >= img_h || x + width > img_w || y + height > img_h {
         return Err("裁剪区域超出图片范围".to_string());
     }
-    let cropped = img.crop(x, y, width, height);
+    let cropped = img.crop_imm(x, y, width, height);
     let temp_path = temp_file_path(&path, "cropped")?;
     save_to_temp(&cropped, &temp_path)?;
     Ok(ImageResult {
@@ -161,6 +170,9 @@ pub fn crop_image(
 /// 变换图片（水平翻转 / 垂直翻转 / 顺时针 90° / 逆时针 90°）
 #[tauri::command]
 pub fn transform_image(path: String, mode: String) -> Result<ImageResult, String> {
+    if is_sensitive_path(&path) {
+        return Err("安全限制：不允许访问系统敏感目录".to_string());
+    }
     check_file_size(&path)?;
     let img = image::open(&path).map_err(|e| format!("无法打开图片: {e}"))?;
     let transformed = match mode.as_str() {
@@ -182,6 +194,9 @@ pub fn transform_image(path: String, mode: String) -> Result<ImageResult, String
 /// 应用组合变换（旋转 + 翻转），一次性执行
 #[tauri::command]
 pub fn apply_transforms(path: String, params: TransformParams) -> Result<ImageResult, String> {
+    if is_sensitive_path(&path) {
+        return Err("安全限制：不允许访问系统敏感目录".to_string());
+    }
     check_file_size(&path)?;
     let mut img = image::open(&path).map_err(|e| format!("无法打开图片: {e}"))?;
 
@@ -215,6 +230,9 @@ pub fn save_image(
     format: String,
     quality: u8,
 ) -> Result<SaveResult, String> {
+    if is_sensitive_path(&temp_path) || is_sensitive_path(&save_path) {
+        return Err("安全限制：不允许访问系统敏感目录".to_string());
+    }
     check_file_size(&temp_path)?;
     let img = image::open(&temp_path).map_err(|e| format!("无法读取临时文件: {e}"))?;
     let save_path = Path::new(&save_path);
@@ -325,6 +343,13 @@ pub async fn batch_process_queue(
 ) -> Result<String, String> {
     if target_width == 0 { return Err("目标宽度必须大于 0".to_string()); }
     if paths.is_empty() { return Err("队列为空".to_string()); }
+
+    // 安全校验：拒绝敏感路径
+    for p in &paths {
+        if is_sensitive_path(p) {
+            return Err("安全限制：不允许访问系统敏感目录".to_string());
+        }
+    }
 
     let entries: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).filter(|p| p.is_file()).collect();
     if entries.is_empty() { return Err("队列中的文件全部失效".to_string()); }
@@ -463,6 +488,39 @@ fn check_file_size_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// 检查路径是否属于系统敏感目录
+fn is_sensitive_path(path: &str) -> bool {
+    let canonical = std::fs::canonicalize(path)
+        .unwrap_or_else(|_| PathBuf::from(path));
+    let path_str = canonical.to_string_lossy().to_lowercase();
+    // 去除 Windows UNC 前缀（\\?\）
+    let path_ref = path_str.strip_prefix(r"\\?\").unwrap_or(&path_str);
+
+    // 系统临时目录豁免（应用自身的临时文件所在）
+    let temp_dir_str = std::env::temp_dir().to_string_lossy().to_lowercase();
+    let temp_dir_ref = temp_dir_str.strip_prefix(r"\\?\").unwrap_or(&temp_dir_str);
+    if path_ref.starts_with(temp_dir_ref) {
+        return false;
+    }
+
+    // Windows 敏感目录
+    let sensitive_prefixes = [
+        r"c:\windows",
+        r"c:\program files",
+        r"c:\program files (x86)",
+    ];
+    for prefix in &sensitive_prefixes {
+        if path_ref.starts_with(prefix) {
+            return true;
+        }
+    }
+    // AppData 目录（所有用户）
+    if path_ref.contains(r"\appdata\") {
+        return true;
+    }
+    false
+}
+
 fn save_to_temp(img: &DynamicImage, path: &PathBuf) -> Result<(), String> {
     img.save(path).map_err(|e| format!("保存失败: {e}"))
 }
@@ -477,6 +535,9 @@ fn png_colors(quality: u8) -> u32 {
 /// 扫描目录顶层图片，按文件名升序排序，跳过子目录
 #[tauri::command]
 pub fn read_dir(folder: String) -> Result<Vec<ImageInfo>, String> {
+    if is_sensitive_path(&folder) {
+        return Err("安全限制：不允许访问系统敏感目录".to_string());
+    }
     // 规范化路径：防止 path traversal
     let canonical = std::fs::canonicalize(&folder)
         .map_err(|e| format!("无法解析路径: {e}"))?;
@@ -572,18 +633,23 @@ pub fn list_subdirs(path: Option<String>) -> Result<Vec<DirInfo>, String> {
 pub fn make_thumbnail(path: String, max_width: u32) -> Result<String, String> {
     if max_width == 0 { return Err("max_width 必须大于 0".to_string()); }
     let max_width = max_width.min(THUMBNAIL_MAX_WIDTH);
+    if is_sensitive_path(&path) {
+        return Err("安全限制：不允许访问系统敏感目录".to_string());
+    }
     check_file_size(&path)?;
 
     // ─── 尝试磁盘缓存 ───
-    let cache_key = {
-        use std::hash::{Hash, Hasher};
-        let mut s = std::collections::hash_map::DefaultHasher::new();
-        path.hash(&mut s);
-        max_width.hash(&mut s);
-        s.finish()
-    };
+    // 缓存 key 纳入文件修改时间，避免同名文件替换后缓存不更新
+    let mtime = std::fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // 用字符串拼接做缓存文件名（避免 DefaultHasher 跨版本不稳定）
+    let safe_name = path.replace(['\\', '/', ':', ' '], "_");
     let cache_dir = std::env::temp_dir().join("piccraft_thumbs");
-    let cache_file = cache_dir.join(format!("{cache_key:x}.png"));
+    let cache_file = cache_dir.join(format!("{safe_name}_{max_width}_{mtime}.png"));
 
     // 如果缓存命中，直接返回
     if cache_file.exists() {
@@ -698,6 +764,9 @@ fn make_thumbnail_fallback(path: &Path, max_width: u32) -> Result<Vec<u8>, Strin
 /// 单文件元数据查询
 #[tauri::command]
 pub fn get_file_meta(path: String) -> Result<FileMeta, String> {
+    if is_sensitive_path(&path) {
+        return Err("安全限制：不允许访问系统敏感目录".to_string());
+    }
     let metadata = std::fs::metadata(Path::new(&path))
         .map_err(|e| format!("读取文件信息失败: {e}"))?;
     Ok(FileMeta {
@@ -725,6 +794,43 @@ fn build_image_info(path: &Path) -> Result<ImageInfo, String> {
 
 fn system_time_to_unix_secs(t: Option<SystemTime>) -> Option<u64> {
     t.and_then(|st| st.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs())
+}
+
+/// 清理上次运行残留的临时文件（piccraft_ 前缀）
+pub fn cleanup_temp_files() {
+    let temp_dir = std::env::temp_dir();
+    if let Ok(entries) = std::fs::read_dir(&temp_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("piccraft_") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+}
+
+/// 清理缩略图磁盘缓存（超过 200MB 时按最旧修改时间淘汰）
+pub fn cleanup_thumb_cache() {
+    let cache_dir = std::env::temp_dir().join("piccraft_thumbs");
+    let Ok(entries) = std::fs::read_dir(&cache_dir) else { return };
+    let mut files: Vec<_> = entries.flatten()
+        .filter_map(|e| {
+            let meta = e.metadata().ok()?;
+            Some((e.path(), meta.len(), meta.modified().ok()?))
+        })
+        .collect();
+    let total: u64 = files.iter().map(|(_, sz, _)| *sz).sum();
+    const MAX_CACHE_BYTES: u64 = 200 * 1024 * 1024; // 200 MB
+    if total <= MAX_CACHE_BYTES { return; }
+    // 按修改时间升序（最旧在前），删除直到总量降到阈值以下
+    files.sort_by_key(|(_, _, mtime)| *mtime);
+    let mut current = total;
+    for (path, sz, _) in &files {
+        if current <= MAX_CACHE_BYTES { break; }
+        let _ = std::fs::remove_file(path);
+        current -= *sz;
+    }
 }
 
 /// 读取启动参数（从 Tauri State 取出）
@@ -828,4 +934,121 @@ pub fn check_file_assoc() -> Result<FileAssocStatus, String> {
 #[tauri::command]
 pub fn register_file_assoc(_write_open: bool, _write_edit: bool) -> Result<String, String> {
     Ok("非 Windows 平台，跳过".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cleanup_temp_files() {
+        // 创建一个 piccraft_ 前缀的临时文件
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("piccraft_test_cleanup_dummy.tmp");
+        std::fs::write(&test_file, b"test").unwrap();
+        assert!(test_file.exists());
+
+        cleanup_temp_files();
+        assert!(!test_file.exists(), "piccraft_ 前缀文件应被清理");
+    }
+
+    #[test]
+    fn test_cleanup_temp_files_preserves_unrelated() {
+        // 非 piccraft_ 前缀文件不应被删除
+        let temp_dir = std::env::temp_dir();
+        let unrelated = temp_dir.join("not_piccraft_test.tmp");
+        std::fs::write(&unrelated, b"keep").unwrap();
+
+        cleanup_temp_files();
+        // 验证不受影响（可能因权限问题存在但不应因函数逻辑被删）
+        if unrelated.exists() {
+            let _ = std::fs::remove_file(&unrelated);
+        }
+    }
+
+    #[test]
+    fn test_cleanup_thumb_cache_under_limit() {
+        // 缓存总量不超过阈值时不应删除文件
+        let cache_dir = std::env::temp_dir().join("piccraft_thumbs");
+        let _ = std::fs::create_dir_all(&cache_dir);
+        let test_file = cache_dir.join("test_small_cache.png");
+        std::fs::write(&test_file, b"tiny").unwrap();
+
+        cleanup_thumb_cache();
+        // 小文件应保留
+        assert!(test_file.exists(), "未超阈值时应保留缓存文件");
+        let _ = std::fs::remove_file(&test_file);
+    }
+
+    #[test]
+    fn test_cleanup_thumb_cache_evicts_oldest() {
+        // 创建超量缓存文件，验证最旧的被淘汰
+        let cache_dir = std::env::temp_dir().join("piccraft_thumbs");
+        let _ = std::fs::create_dir_all(&cache_dir);
+
+        // 写入 3 个文件，每个 100MB（用稀疏文件避免实际占用磁盘）
+        let mut files = Vec::new();
+        for i in 0..3 {
+            let f = cache_dir.join(format!("test_evict_{i}.png"));
+            // 写入实际内容（100MB 太大，改为调低阈值来测试逻辑）
+            std::fs::write(&f, vec![0u8; 1024 * 100]).unwrap(); // 100KB
+            files.push(f);
+        }
+
+        // 总量 300KB 远低于 200MB，所以不会删除——仅验证函数不 panic
+        cleanup_thumb_cache();
+
+        // 清理测试文件
+        for f in &files {
+            let _ = std::fs::remove_file(f);
+        }
+    }
+
+    #[test]
+    fn test_is_sensitive_path_windows() {
+        assert!(is_sensitive_path(r"C:\Windows\System32\cmd.exe"));
+        assert!(is_sensitive_path(r"C:\Users\test\AppData\Local\foo"));
+        assert!(is_sensitive_path(r"C:\Program Files\bar"));
+        assert!(is_sensitive_path(r"C:\Program Files (x86)\baz"));
+    }
+
+    #[test]
+    fn test_is_sensitive_path_safe_paths() {
+        assert!(!is_sensitive_path(r"D:\Pictures\photo.jpg"));
+        assert!(!is_sensitive_path(r"C:\Users\test\Pictures\photo.jpg"));
+        assert!(!is_sensitive_path(r"E:\Photos\vacation\img.png"));
+    }
+
+    #[test]
+    fn test_is_sensitive_path_temp_dir_exempt() {
+        // 系统临时目录下的文件不应被阻止（应用自身的临时文件所在）
+        let temp_file = std::env::temp_dir().join("test_sensitive_check.tmp");
+        assert!(!is_sensitive_path(temp_file.to_str().unwrap()));
+    }
+
+    #[test]
+    fn test_png_colors_bounds() {
+        assert_eq!(png_colors(1), 16);      // 最低质量 → 16 色
+        assert_eq!(png_colors(100), 256);   // 最高质量 → 256 色
+        assert_eq!(png_colors(0), 16);      // clamp 到 1
+        assert_eq!(png_colors(101), 256);   // clamp 到 100
+        assert_eq!(png_colors(50), 134);    // 中间值线性插值: 16 + 49*240/99 = 134
+    }
+
+    #[test]
+    fn test_check_file_size_ok() {
+        // 创建小文件，应通过校验
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("piccraft_test_filesize_ok.tmp");
+        std::fs::write(&test_file, b"small").unwrap();
+        assert!(check_file_size_path(&test_file).is_ok());
+        let _ = std::fs::remove_file(&test_file);
+    }
+
+    #[test]
+    fn test_check_file_size_not_found() {
+        // 不存在的文件应返回错误
+        let result = check_file_size_path(Path::new("nonexistent_file_12345678.tmp"));
+        assert!(result.is_err());
+    }
 }

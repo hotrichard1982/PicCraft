@@ -46,5 +46,5 @@
 
 ## 关联
 
-- [CONTEXT.md §5 加入队列的入口](../CONTEXT.md#5-加入队列的入口)
-- [CONTEXT.md §5.7 批量视图 - 队列面板细节](../CONTEXT.md#57-批量视图---队列面板细节-batch-view---queue-panel)
+- [CONTEXT.md §5 加入队列的入口](../../CONTEXT.md#5-加入队列的入口)
+- [CONTEXT.md §5.7 批量视图 - 队列面板细节](../../CONTEXT.md#57-批量视图---队列面板细节-batch-view---queue-panel)

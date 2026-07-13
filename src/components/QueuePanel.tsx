@@ -126,12 +126,16 @@ function ContextMenu({
     // capture 阶段拿事件，避免 React stopPropagation 影响
     document.addEventListener("mousedown", onDown, true)
     document.addEventListener("keydown", onKey, true)
-    // 滚动时关（避免菜单飘着）
-    window.addEventListener("scroll", onClose, true)
+    // 滚动时关（避免菜单飘着），但菜单内部滚动不关
+    const onScroll = (e: Event) => {
+      const target = e.target as HTMLElement | null
+      if (!target?.closest("[data-context-menu]")) onClose()
+    }
+    window.addEventListener("scroll", onScroll, true)
     return () => {
       document.removeEventListener("mousedown", onDown, true)
       document.removeEventListener("keydown", onKey, true)
-      window.removeEventListener("scroll", onClose, true)
+      window.removeEventListener("scroll", onScroll, true)
     }
   }, [onClose])
 

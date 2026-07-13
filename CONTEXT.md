@@ -48,7 +48,7 @@
 | **移出队列 (Dequeue)** | 把图片从队列移除。 |
 | **清空队列 (Clear Queue)** | 清空整个队列。 |
 | **打开图片 (Open Image)** | 在单图编辑视图中打开某张图片（隐含自动 Enqueue）。 |
-| **切换目录 (Switch Folder)** | 改变浏览视图的当前目录。**会清空队列**（与"清空队列"区分）。 |
+| **切换目录 (Switch Folder)** | 改变浏览视图的当前目录。清空选中但不影响队列。 |
 | **进入全屏 (Enter Fullscreen)** | 在浏览视图中聚焦某张图进入全屏看图。 |
 | **退出全屏 (Exit Fullscreen)** | 从全屏看图退回到缩略图网格。`Esc` 触发。 |
 
@@ -108,7 +108,7 @@
 | **状态管理** | **Zustand**（轻量、局部订阅、4 视图共享） |
 | **持久化** | Zustand 持有运行时镜像 + 启动时从 `tauri-plugin-store` 读、写时双写 |
 | **读目录** | **Rust 端**新增 `read_dir` 命令，扫描 + 过滤格式 + 读元数据 |
-| **缩略图生成** | **Rust 端**新增 `make_thumbnail` 命令，返回 PNG bytes；前端用 base64/data URL 渲染 |
+| **缩略图生成** | **Rust 端** `make_thumbnail`，JPEG 快速解码 + 磁盘缓存（temp 目录，200MB 上限自动清理） |
 | **关联格式管理** | `tauri-plugin-store` 存勾选状态 + Rust 端单独写 Windows 注册表命令 |
 | **批量命令** | 保留旧 `batch_process(input_dir, ...)`，**新增** `batch_process_queue(paths, ...)` |
 
@@ -149,7 +149,7 @@
 
 - 支持格式：jpg / jpeg / png / webp / bmp
 - **不递归子目录**
-- 不做：图片搜索、标签、EXIF 编辑、缩略图磁盘缓存
+- 不做：图片搜索、标签、EXIF 编辑
 
 ## 9. 经验教训 (Lessons Learned)
 
@@ -173,7 +173,6 @@
 ## 10. 不在范围 (Out of Scope)
 
 - 图片搜索、标签、评分
-- 缩略图缓存的磁盘持久化
 - 远程图片
 - 视频文件
 - 单图编辑的撤销栈（除已实现的）

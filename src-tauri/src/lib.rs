@@ -8,6 +8,7 @@ use image_ops::{
 use serde::Serialize;
 use std::path::Path;
 use tauri::{Emitter, Manager};
+use image_ops::{cleanup_temp_files, cleanup_thumb_cache};
 
 /// 启动模式
 #[derive(Debug, Serialize, Clone, Default, PartialEq, Eq)]
@@ -33,38 +34,9 @@ pub struct StartupArgs {
 pub fn parse_startup_args() -> StartupArgs {
     let mut iter = std::env::args_os();
     let _exe = iter.next();
-
-    let first = match iter.next() {
-        Some(a) => a,
-        None => return StartupArgs::default(),
-    };
-
-    if first == "--edit" {
-        let file = iter.next().map(|a| a.to_string_lossy().into_owned());
-        return StartupArgs {
-            mode: StartupMode::Edit,
-            file,
-            folder: None,
-        };
-    }
-
-    let path_str = first.to_string_lossy().into_owned();
-    let p = Path::new(&path_str);
-
-    if p.is_dir() {
-        StartupArgs {
-            mode: StartupMode::Browse,
-            file: None,
-            folder: Some(path_str),
-        }
-    } else {
-        // 文件（含不存在 / 权限问题，统一按"尝试作为文件"处理）
-        StartupArgs {
-            mode: StartupMode::Browse,
-            file: Some(path_str),
-            folder: None,
-        }
-    }
+    // 将 OsString 转为 String 后委托公共解析函数
+    let args: Vec<String> = iter.map(|a| a.to_string_lossy().into_owned()).collect();
+    parse_args_from_strings(args.into_iter())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -97,6 +69,10 @@ pub fn run() {
             }
         }))
         .setup(move |app| {
+            // 清理上次运行残留的临时文件和超额缩略图缓存
+            cleanup_temp_files();
+            cleanup_thumb_cache();
+
             // 把首次启动 args 注入 State
             app.manage(StartupArgsInner(std::sync::Mutex::new(initial_args)));
 
@@ -137,19 +113,20 @@ pub fn run() {
 /// Tauri State 容器：Mutex 包一层让 single-instance 转发能 mutate
 pub struct StartupArgsInner(pub std::sync::Mutex<StartupArgs>);
 
-/// 从给定的 args 迭代器解析（single-instance 转发用，避免重复读 env）
-fn parse_from_iter<I, S>(mut iter: I) -> StartupArgs
+/// 公共解析逻辑：从字符串迭代器解析启动参数
+fn parse_args_from_strings<I, S>(mut iter: I) -> StartupArgs
 where
     I: Iterator<Item = S>,
-    S: Into<String>,
+    S: AsRef<str>,
 {
-    let first: String = match iter.next() {
-        Some(a) => a.into(),
+    let first = match iter.next() {
+        Some(a) => a,
         None => return StartupArgs::default(),
     };
+    let first = first.as_ref();
 
     if first == "--edit" {
-        let file = iter.next().map(Into::into);
+        let file = iter.next().map(|a| a.as_ref().to_string());
         return StartupArgs {
             mode: StartupMode::Edit,
             file,
@@ -157,20 +134,29 @@ where
         };
     }
 
-    let p = Path::new(&first);
+    let p = Path::new(first);
     if p.is_dir() {
         StartupArgs {
             mode: StartupMode::Browse,
             file: None,
-            folder: Some(first),
+            folder: Some(first.to_string()),
         }
     } else {
         StartupArgs {
             mode: StartupMode::Browse,
-            file: Some(first),
+            file: Some(first.to_string()),
             folder: None,
         }
     }
+}
+
+/// 从给定的 args 迭代器解析（single-instance 转发用，避免重复读 env）
+fn parse_from_iter<I, S>(iter: I) -> StartupArgs
+where
+    I: Iterator<Item = S>,
+    S: AsRef<str>,
+{
+    parse_args_from_strings(iter)
 }
 
 #[cfg(test)]
@@ -178,8 +164,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_parse_cold() {
+        let result = parse_args_from_strings(std::iter::empty::<String>());
+        assert_eq!(result.mode, StartupMode::Cold);
+        assert!(result.file.is_none());
+        assert!(result.folder.is_none());
+    }
+
+    #[test]
+    fn test_parse_edit() {
+        let args = vec!["--edit".to_string(), "C:/img.jpg".to_string()];
+        let result = parse_args_from_strings(args.into_iter());
+        assert_eq!(result.mode, StartupMode::Edit);
+        assert_eq!(result.file, Some("C:/img.jpg".to_string()));
+        assert!(result.folder.is_none());
+    }
+
+    #[test]
+    fn test_parse_edit_no_file() {
+        // --edit 后面没有文件路径
+        let result = parse_args_from_strings(std::iter::once("--edit".to_string()));
+        assert_eq!(result.mode, StartupMode::Edit);
+        assert!(result.file.is_none());
+    }
+
+    #[test]
+    fn test_parse_browse_file() {
+        // 非目录路径 → Browse 模式 + file
+        let result = parse_args_from_strings(std::iter::once("D:/photos/img.jpg".to_string()));
+        assert_eq!(result.mode, StartupMode::Browse);
+        assert_eq!(result.file, Some("D:/photos/img.jpg".to_string()));
+        assert!(result.folder.is_none());
+    }
+
+    // 保留 parse_from_iter 的委托测试，确保向后兼容
+    #[test]
     fn test_parse_from_iter_cold() {
-        // 调用方应已跳过 exe，第一个元素就是第一个真正的参数
         let result = parse_from_iter(std::iter::empty::<String>());
         assert_eq!(result.mode, StartupMode::Cold);
         assert!(result.file.is_none());
@@ -188,7 +208,6 @@ mod tests {
 
     #[test]
     fn test_parse_from_iter_edit() {
-        // 调用方应已跳过 exe，剩余 ["--edit", "C:/img.jpg"]
         let args = vec!["--edit".to_string(), "C:/img.jpg".to_string()];
         let result = parse_from_iter(args.into_iter());
         assert_eq!(result.mode, StartupMode::Edit);

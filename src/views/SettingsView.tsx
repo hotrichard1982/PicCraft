@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react"
 import { openUrl } from "@tauri-apps/plugin-opener"
-import { Settings, HelpCircle, Info, Check, Save } from "lucide-react"
+import { Settings, HelpCircle, Info, Check, Save, Folder, List, Pencil, ExternalLink } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
@@ -123,22 +123,22 @@ const HELP_ITEMS: Array<{ title: string; body: string; icon: React.ReactNode }> 
   {
     title: "如何浏览图片",
     body: "点击工具栏「打开目录」选择文件夹，进入缩略图网格；按 Ctrl+A 可全选当前目录所有图片。",
-    icon: <FolderIcon />,
+    icon: <Folder className="size-4" />,
   },
   {
     title: "如何加入队列",
     body: "在浏览视图右键点击缩略图（或选中的多张缩略图），选择「加入队列」；操作完成后会自动切换到批量编辑视图。",
-    icon: <QueueIcon />,
+    icon: <List className="size-4" />,
   },
   {
     title: "如何编辑 / 批量处理",
     body: "单图编辑用 Konva 画布做裁剪、翻转、旋转；批量编辑视图左侧是队列面板，可统一对队列中的图片执行缩放、压缩、格式转换。",
-    icon: <EditIcon />,
+    icon: <Pencil className="size-4" />,
   },
   {
     title: "双击图片的关联行为",
     body: "在 Windows 资源管理器双击 .jpg 默认进入浏览视图并全屏看图；右键「打开方式 → 用图轻剪编辑」则进入单图编辑视图。两种入口由 OS 触发源区分。",
-    icon: <OpenIcon />,
+    icon: <ExternalLink className="size-4" />,
   },
 ]
 
@@ -165,44 +165,6 @@ function HelpSubTab() {
         ))}
       </div>
     </div>
-  )
-}
-
-// ─── 帮助子 Tab 用到的 lucide 替身（保持轻量）───
-function FolderIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
-    </svg>
-  )
-}
-function QueueIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="8" y1="6" x2="21" y2="6" />
-      <line x1="8" y1="12" x2="21" y2="12" />
-      <line x1="8" y1="18" x2="21" y2="18" />
-      <line x1="3" y1="6" x2="3.01" y2="6" />
-      <line x1="3" y1="12" x2="3.01" y2="12" />
-      <line x1="3" y1="18" x2="3.01" y2="18" />
-    </svg>
-  )
-}
-function EditIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
-    </svg>
-  )
-}
-function OpenIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M15 3h6v6" />
-      <path d="M10 14 21 3" />
-      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-    </svg>
   )
 }
 

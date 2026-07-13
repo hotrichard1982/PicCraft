@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useReducer, useRef } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { open } from "@tauri-apps/plugin-dialog"
+import { load as loadStore } from "@tauri-apps/plugin-store"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -18,8 +19,6 @@ interface BatchProgress {
   path: string
   error: string | null
 }
-
-const STORAGE_KEY_OUTPUT = "piccraft-batch-output"
 
 // 批处理运行时状态
 interface BatchRunState {
@@ -68,23 +67,33 @@ export function BatchTab() {
   })
   const [statusText, setStatusText] = useState("准备就绪")
 
-  // 启动时从 localStorage 恢复上次的 outputDir
+  // 启动时从 Tauri Store 恢复上次的 outputDir
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_OUTPUT)
-      if (saved) setOutputDir(saved)
-    } catch {
-      // ignore
-    }
+    let mounted = true
+    ;(async () => {
+      try {
+        const store = await loadStore("piccraft-state.json")
+        const saved = await store.get<string>("batchOutputDir")
+        if (mounted && saved) setOutputDir(saved)
+      } catch {
+        // ignore
+      }
+    })()
+    return () => { mounted = false }
   }, [])
 
-  // 写回 localStorage
+  // 写回 Tauri Store
   useEffect(() => {
-    try {
-      if (outputDir) localStorage.setItem(STORAGE_KEY_OUTPUT, outputDir)
-    } catch {
-      // ignore
-    }
+    if (!outputDir) return
+    ;(async () => {
+      try {
+        const store = await loadStore("piccraft-state.json")
+        await store.set("batchOutputDir", outputDir)
+        await store.save()
+      } catch {
+        // ignore
+      }
+    })()
   }, [outputDir])
 
   const selectOutput = useCallback(async () => {

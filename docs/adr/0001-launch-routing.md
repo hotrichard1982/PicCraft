@@ -71,9 +71,9 @@ HKCU\Software\Classes\SystemFileAssociations\image\shell\edit\command
 
 - macOS 文件关联不走 `std::env::args()`，需用 `tauri::RunEvent::Opened { urls }` 事件
 - Linux 走 `.desktop` 文件 + `MimeType=`
-- 这两平台在 [CONTEXT.md §9 Out of Scope](../CONTEXT.md#9-不在范围-out-of-scope) 已声明不在本期
+- 这两平台在 [CONTEXT.md §9 Out of Scope](../../CONTEXT.md#9-不在范围-out-of-scope) 已声明不在本期
 
 ## 关联
 
-- [CONTEXT.md §7.1 启动路由](../CONTEXT.md#71-启动路由)
-- [CONTEXT.md §5.8 架构决策](../CONTEXT.md#58-架构决策-architecture-decisions)
+- [CONTEXT.md §7.1 启动路由](../../CONTEXT.md#71-启动路由)
+- [CONTEXT.md §5.8 架构决策](../../CONTEXT.md#58-架构决策-architecture-decisions)

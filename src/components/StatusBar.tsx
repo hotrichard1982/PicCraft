@@ -1,5 +1,4 @@
 import { useAppStore } from "@/store"
-import type { DirEntry } from "@/views/BrowseView"
 
 interface StatusBarProps {
   totalCount: number
@@ -10,12 +9,6 @@ function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
-}
-
-function formatDate(unix: number | null): string {
-  if (!unix) return "—"
-  const d = new Date(unix * 1000)
-  return d.toLocaleString("zh-CN", { hour12: false })
 }
 
 export function StatusBar({ totalCount }: StatusBarProps) {
@@ -43,5 +36,4 @@ export function StatusBar({ totalCount }: StatusBarProps) {
 }
 
 // 暴露 format 辅助供其他组件复用
-export { formatSize, formatDate }
-export type { DirEntry }
+export { formatSize }

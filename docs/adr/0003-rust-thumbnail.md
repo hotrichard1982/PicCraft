@@ -12,8 +12,10 @@
 
 **Rust 端**新增 `make_thumbnail(path, max_width)` 命令：
 - 用 `image` crate 把图片缩到指定宽度（保持纵横比）
+- JPEG 走快速路径：用 `jpeg-decoder` 的 scale 参数降低分辨率解码，跳过整图解码
 - 输出 PNG bytes 返回前端
 - 前端用 `data:image/png;base64,...` 渲染
+- **磁盘缓存**：缩略图缓存到 temp 目录（`piccraft_thumbs`），缓存 key 纳入文件路径 + max_width + mtime，避免同名文件替换后缓存不更新。缓存超 200MB 时自动按最旧修改时间淘汰
 
 调用时机：**懒加载** —— 缩略图进入视口（intersection observer）时调用，未进入视口不调用。
 
@@ -26,12 +28,12 @@
 - ❌ 浏览器解码 + 渲染 1000 张原图卡顿严重
 - ❌ Konva 主要是矢量画布，做位图缩放没优势
 
-### 备选 B：Rust 生成缩略图 + 写磁盘缓存
+### 备选 B：Rust 生成缩略图 + 写磁盘缓存（✅ 已采纳）
 
 - ✅ 第二次进入目录秒开
-- ❌ 缩略图文件散落磁盘（`%APPDATA%/piccraft/thumbnails/...`）
-- ❌ 原图删除/移动后缓存清理逻辑复杂
-- ❌ 增大本期范围
+- ✅ 缓存 key 纳入 mtime，原图替换后自动失效
+- ✅ temp 目录 + 200MB 上限自动清理，不散落用户目录
+- ✅ JPEG 快速解码进一步加速首次生成
 
 ### 备选 C：Rust 生成 + 内存缓存（LRU 1000 张）
 
@@ -41,13 +43,13 @@
 
 ## 后果
 
-- Rust 端新增依赖：无（`image` crate 已在用）
+- Rust 端新增依赖：`jpeg-decoder`（JPEG 快速解码）
 - 新增 `make_thumbnail` 命令
 - 前端用 `data:` URL 而非 `asset:` URL（base64 比文件协议对缩略图这种小数据更快）
-- 切换目录时清空缩略图缓存
-- **不**做磁盘缓存（ADR-0003-B 留作未来优化）
+- 切换目录时清空前端内存缓存（磁盘缓存保留，跨会话复用）
+- 磁盘缓存存于 temp 目录，应用启动时自动清理超量缓存
 
 ## 关联
 
-- [CONTEXT.md §5.5 浏览视图交互细节](../CONTEXT.md#55-浏览视图交互细节-browse-view-interaction)
-- [CONTEXT.md §5.8 架构决策](../CONTEXT.md#58-架构决策-architecture-decisions)
+- [CONTEXT.md §5.5 浏览视图交互细节](../../CONTEXT.md#55-浏览视图交互细节-browse-view-interaction)
+- [CONTEXT.md §5.8 架构决策](../../CONTEXT.md#58-架构决策-architecture-decisions)

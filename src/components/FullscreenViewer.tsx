@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useReducer } from "react"
 import { Stage, Layer, Image as KonvaImage } from "react-konva"
+import type Konva from "konva"
 import { invoke } from "@tauri-apps/api/core"
 import { convertFileSrc } from "@tauri-apps/api/core"
 import {
@@ -110,7 +111,7 @@ export function FullscreenViewer({
   const [showHint, setShowHint] = useState(true) // 首次进入提示
 
   const containerRef = useRef<HTMLDivElement>(null)
-  const stageRef = useRef<unknown>(null)
+  const stageRef = useRef<Konva.Stage>(null)
   const hideTimerRef = useRef<number | null>(null)
   const lastMouseRef = useRef<{ x: number; y: number } | null>(null)
   const metaCacheRef = useRef<Map<string, { size: number; format: string; width: number; height: number }>>(new Map())
@@ -356,7 +357,7 @@ export function FullscreenViewer({
 
       {/* 画布 */}
       <Stage
-        ref={stageRef as never}
+        ref={stageRef}
         width={view.stageSize.w}
         height={view.stageSize.h}
         draggable

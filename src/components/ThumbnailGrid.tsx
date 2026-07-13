@@ -92,10 +92,13 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
                 sub[path] = url
                 thumbCacheRef.current.set(maxWidth, sub)
                 cacheSizeRef.current++
-                // 缓存上限保护：超限时清空全部（切换目录时自动重建）
+                // 缓存上限保护：超限时 LRU 淘汰最旧的 sub-map
                 if (cacheSizeRef.current > MAX_CACHE_SIZE) {
-                  thumbCacheRef.current.clear()
-                  cacheSizeRef.current = 0
+                  const oldestKey = Math.min(...Array.from(thumbCacheRef.current.keys()))
+                  const sub = thumbCacheRef.current.get(oldestKey)
+                  const removed = sub ? Object.keys(sub).length : 0
+                  thumbCacheRef.current.delete(oldestKey)
+                  cacheSizeRef.current -= removed
                 }
                 setThumbs((prev) => ({ ...prev, [path]: url }))
               })

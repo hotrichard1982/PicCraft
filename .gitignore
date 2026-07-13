@@ -38,4 +38,5 @@ release-assets/
 pnpm-workspace.yaml
 AGENTS.md
 skills/
-.agent/
+.agents/
+tools/
