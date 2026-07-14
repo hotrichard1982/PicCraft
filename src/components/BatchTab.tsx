@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator"
 import { FolderOpen, Play } from "lucide-react"
 import { QueuePanel } from "@/components/QueuePanel"
 import { useAppStore } from "@/store"
+import { createReducer } from "@/lib/state-utils"
 
 interface BatchProgress {
   current: number
@@ -34,22 +35,19 @@ type BatchRunAction =
   | { type: "listenFailed" }
   | { type: "finish" }
 
-function batchRunReducer(state: BatchRunState, action: BatchRunAction): BatchRunState {
-  switch (action.type) {
-    case "start":
-      return { ...state, processing: true, errors: [], listenFailed: false, progress: { current: 0, total: 0, filename: "", path: "", error: null } }
-    case "setProgress":
-      return {
-        ...state,
-        progress: action.progress,
-        errors: action.error ? [...state.errors, `${action.progress.filename}: ${action.error}`] : state.errors,
-      }
-    case "listenFailed":
-      return { ...state, listenFailed: true }
-    case "finish":
-      return { ...state, processing: false }
-  }
-}
+const batchRunReducer = createReducer<BatchRunState, BatchRunAction>({
+  start: (state) => ({
+    ...state, processing: true, errors: [], listenFailed: false,
+    progress: { current: 0, total: 0, filename: "", path: "", error: null },
+  }),
+  setProgress: (state, action) => ({
+    ...state,
+    progress: action.progress,
+    errors: action.error ? [...state.errors, `${action.progress.filename}: ${action.error}`] : state.errors,
+  }),
+  listenFailed: (state) => ({ ...state, listenFailed: true }),
+  finish: (state) => ({ ...state, processing: false }),
+})
 
 export function BatchTab() {
   const queue = useAppStore((s) => s.queue)

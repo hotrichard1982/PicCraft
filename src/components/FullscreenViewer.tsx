@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/store"
 import { formatSize } from "@/components/StatusBar"
 import type { DirEntry } from "@/views/BrowseView"
+import { createReducer } from "@/lib/state-utils"
 
 interface FullscreenViewerProps {
   entries: DirEntry[]
@@ -42,16 +43,11 @@ type ImageLoadAction =
   | { type: "loadSuccess"; img: HTMLImageElement; w: number; h: number }
   | { type: "loadError"; error: string }
 
-function imageLoadReducer(state: ImageLoadState, action: ImageLoadAction): ImageLoadState {
-  switch (action.type) {
-    case "loadStart":
-      return { ...state, img: null, loading: true, loadError: null }
-    case "loadSuccess":
-      return { img: action.img, imgSize: { w: action.w, h: action.h }, loading: false, loadError: null }
-    case "loadError":
-      return { ...state, img: null, loading: false, loadError: action.error }
-  }
-}
+const imageLoadReducer = createReducer<ImageLoadState, ImageLoadAction>({
+  loadStart: (state) => ({ ...state, img: null, loading: true, loadError: null }),
+  loadSuccess: (_state, action) => ({ img: action.img, imgSize: { w: action.w, h: action.h }, loading: false, loadError: null }),
+  loadError: (state, action) => ({ ...state, img: null, loading: false, loadError: action.error }),
+})
 
 // 画布视图相关状态（含旋转）
 interface ViewState {
@@ -68,25 +64,18 @@ type ViewAction =
   | { type: "setScaleAndPos"; scale: number; x: number; y: number; rotation?: number }
   | { type: "rotate" }
 
-function viewReducer(state: ViewState, action: ViewAction): ViewState {
-  switch (action.type) {
-    case "resize":
-      return { ...state, stageSize: { w: action.w, h: action.h } }
-    case "setScale":
-      return { ...state, scale: action.scale }
-    case "setPos":
-      return { ...state, pos: { x: action.x, y: action.y } }
-    case "setScaleAndPos":
-      return {
-        stageSize: state.stageSize,
-        scale: action.scale,
-        pos: { x: action.x, y: action.y },
-        rotation: action.rotation ?? state.rotation,
-      }
-    case "rotate":
-      return { ...state, rotation: (state.rotation + 90) % 360 }
-  }
-}
+const viewReducer = createReducer<ViewState, ViewAction>({
+  resize: (state, action) => ({ ...state, stageSize: { w: action.w, h: action.h } }),
+  setScale: (state, action) => ({ ...state, scale: action.scale }),
+  setPos: (state, action) => ({ ...state, pos: { x: action.x, y: action.y } }),
+  setScaleAndPos: (state, action) => ({
+    stageSize: state.stageSize,
+    scale: action.scale,
+    pos: { x: action.x, y: action.y },
+    rotation: action.rotation ?? state.rotation,
+  }),
+  rotate: (state) => ({ ...state, rotation: (state.rotation + 90) % 360 }),
+})
 
 export function FullscreenViewer({
   entries,

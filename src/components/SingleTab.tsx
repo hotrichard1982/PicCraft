@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator"
 import { Slider } from "@/components/ui/slider"
 import { CropCanvas, type CropRect } from "@/components/CropCanvas"
 import { useAppStore } from "@/store"
+import { createReducer } from "@/lib/state-utils"
 import { FolderOpen, RotateCcw, Save, Download, ListPlus } from "lucide-react"
 
 interface ImageInfo {
@@ -49,30 +50,24 @@ export type ImageAction =
   | { type: "setCropRect"; rect: CropRect | null }
   | { type: "resetToOriginal" }
 
-export function imageReducer(state: ImageState, action: ImageAction): ImageState {
-  switch (action.type) {
-    case "loadImage":
-      return {
-        filePath: action.path,
-        imageInfo: action.info,
-        displayPath: action.path,
-        tempPath: null,
-        cropRect: null,
-        hasImage: true,
-        isPng: action.info.format.toLowerCase().includes("png"),
-      }
-    case "setDisplayPath":
-      return { ...state, displayPath: action.path }
-    case "setTempPath":
-      return { ...state, displayPath: action.path, tempPath: action.path, cropRect: null }
-    case "setCropRect":
-      return { ...state, cropRect: action.rect }
-    case "resetToOriginal":
-      return state.filePath
-        ? { ...state, displayPath: state.filePath, tempPath: null, cropRect: null }
-        : state
-  }
-}
+export const imageReducer = createReducer<ImageState, ImageAction>({
+  loadImage: (_state, action) => ({
+    filePath: action.path,
+    imageInfo: action.info,
+    displayPath: action.path,
+    tempPath: null,
+    cropRect: null,
+    hasImage: true,
+    isPng: action.info.format.toLowerCase().includes("png"),
+  }),
+  setDisplayPath: (state, action) => ({ ...state, displayPath: action.path }),
+  setTempPath: (state, action) => ({ ...state, displayPath: action.path, tempPath: action.path, cropRect: null }),
+  setCropRect: (state, action) => ({ ...state, cropRect: action.rect }),
+  resetToOriginal: (state) =>
+    state.filePath
+      ? { ...state, displayPath: state.filePath, tempPath: null, cropRect: null }
+      : state,
+})
 
 // 编辑参数相关状态
 export interface EditState {
@@ -89,20 +84,13 @@ export type EditAction =
   | { type: "setQuality"; value: string }
   | { type: "setSize"; width: string; height: string }
 
-export function editReducer(state: EditState, action: EditAction): EditState {
-  switch (action.type) {
-    case "setWidth":
-      return { ...state, width: action.value }
-    case "setHeight":
-      return { ...state, height: action.value }
-    case "setKeepAspect":
-      return { ...state, keepAspect: action.value }
-    case "setQuality":
-      return { ...state, quality: action.value }
-    case "setSize":
-      return { ...state, width: action.width, height: action.height }
-  }
-}
+export const editReducer = createReducer<EditState, EditAction>({
+  setWidth: (state, action) => ({ ...state, width: action.value }),
+  setHeight: (state, action) => ({ ...state, height: action.value }),
+  setKeepAspect: (state, action) => ({ ...state, keepAspect: action.value }),
+  setQuality: (state, action) => ({ ...state, quality: action.value }),
+  setSize: (_state, action) => ({ ..._state, width: action.width, height: action.height }),
+})
 
 export function SingleTab() {
 

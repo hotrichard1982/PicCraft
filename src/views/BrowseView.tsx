@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useReducer } from "react"
+import { useEffect, useState, useCallback, useMemo } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { FolderOpen } from "lucide-react"
 import { useAppStore } from "@/store"
@@ -6,6 +6,7 @@ import { ThumbnailGrid } from "@/components/ThumbnailGrid"
 import { StatusBar } from "@/components/StatusBar"
 import { FullscreenViewer } from "@/components/FullscreenViewer"
 import { Sidebar } from "@/components/Sidebar"
+import { useAsyncState } from "@/lib/state-utils"
 
 export interface DirEntry {
   path: string
@@ -23,39 +24,13 @@ const THUMB_MIN = 100
 const THUMB_MAX = 800
 const THUMB_STEP = 0.1 // ±10% / 步
 
-// 目录加载相关状态合并为 reducer
-export interface DirState {
-  entries: DirEntry[]
-  loading: boolean
-  error: string | null
-}
-
-export type DirAction =
-  | { type: "loadStart" }
-  | { type: "loadSuccess"; entries: DirEntry[] }
-  | { type: "loadError"; error: string }
-  | { type: "clear" }
-
-export function dirReducer(state: DirState, action: DirAction): DirState {
-  switch (action.type) {
-    case "loadStart":
-      return { ...state, loading: true, error: null }
-    case "loadSuccess":
-      return { entries: action.entries, loading: false, error: null }
-    case "loadError":
-      return { entries: [], loading: false, error: action.error }
-    case "clear":
-      return { entries: [], loading: false, error: null }
-  }
-}
-
 export function BrowseView() {
   const currentFolder = useAppStore((s) => s.currentFolder)
   const setCurrentFolder = useAppStore((s) => s.setCurrentFolder)
   const browseTargetFile = useAppStore((s) => s.browseTargetFile)
   const setBrowseTargetFile = useAppStore((s) => s.setBrowseTargetFile)
 
-  const [dir, dispatch] = useReducer(dirReducer, { entries: [], loading: false, error: null })
+  const [dir, dispatch] = useAsyncState<DirEntry[]>([])
   const [thumbSize, setThumbSize] = useState(THUMB_DEFAULT)
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null)
 
@@ -64,7 +39,7 @@ export function BrowseView() {
     dispatch({ type: "loadStart" })
     try {
       const result = await invoke<DirEntry[]>("read_dir", { folder })
-      dispatch({ type: "loadSuccess", entries: result })
+      dispatch({ type: "loadSuccess", data: result })
     } catch (e) {
       dispatch({ type: "loadError", error: String(e) })
     }
@@ -76,21 +51,21 @@ export function BrowseView() {
       // 切换目录时关闭全屏看图
       setFullscreenIndex(null)
     } else {
-      dispatch({ type: "clear" })
+      dispatch({ type: "clear", initialData: [] })
     }
   }, [currentFolder, loadFolder])
 
   // ─── 双击／启动指定目标文件 → 自动进入全屏 ───
   useEffect(() => {
-    if (browseTargetFile && dir.entries.length > 0 && !dir.loading) {
-      const idx = dir.entries.findIndex((e) => e.path === browseTargetFile)
+    if (browseTargetFile && dir.data.length > 0 && !dir.loading) {
+      const idx = dir.data.findIndex((e) => e.path === browseTargetFile)
       if (idx >= 0) {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setFullscreenIndex(idx)
       }
       setBrowseTargetFile(null)
     }
-  }, [browseTargetFile, dir.entries, dir.loading, setBrowseTargetFile])
+  }, [browseTargetFile, dir.data, dir.loading, setBrowseTargetFile])
 
   // ─── 侧边栏选择目录 ───
   const handleSelectDirectory = useCallback(
@@ -133,7 +108,7 @@ export function BrowseView() {
     return () => window.removeEventListener("keydown", onKey)
   }, [bumpThumbSize])
 
-  const totalCount = useMemo(() => dir.entries.length, [dir.entries])
+  const totalCount = useMemo(() => dir.data.length, [dir.data])
 
   return (
     <div className="h-full flex" onWheel={handleWheel}>
@@ -170,13 +145,13 @@ export function BrowseView() {
             <div className="h-full flex items-center justify-center text-sm text-destructive">
               {dir.error}
             </div>
-          ) : dir.entries.length === 0 ? (
+          ) : dir.data.length === 0 ? (
             <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
               该目录没有图片
             </div>
           ) : (
             <ThumbnailGrid
-              entries={dir.entries}
+              entries={dir.data}
               thumbSize={thumbSize}
               onOpenFullscreen={(i) => setFullscreenIndex(i)}
             />
@@ -186,7 +161,7 @@ export function BrowseView() {
         {/* 全屏看图 */}
         {fullscreenIndex !== null && (
           <FullscreenViewer
-            entries={dir.entries}
+            entries={dir.data}
             currentIndex={fullscreenIndex}
             onClose={() => setFullscreenIndex(null)}
             onIndexChange={setFullscreenIndex}

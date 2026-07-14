@@ -4,6 +4,7 @@ import { convertFileSrc } from "@tauri-apps/api/core"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { FlipHorizontal, FlipVertical, RotateCw, RotateCcw } from "lucide-react"
 import type Konva from "konva"
+import { createReducer } from "@/lib/state-utils"
 
 export interface CropRect {
   x: number
@@ -63,17 +64,11 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onAppl
     | { type: "loaded"; image: HTMLImageElement; width: number; height: number }
     | { type: "clear" }
 
-  const [imgLoad, dispatchImgLoad] = useReducer(
-    (_state: ImgLoadState, action: ImgLoadAction): ImgLoadState => {
-      switch (action.type) {
-        case "loaded":
-          return { image: action.image, imageSize: { width: action.width, height: action.height } }
-        case "clear":
-          return { image: null, imageSize: { width: 0, height: 0 } }
-      }
-    },
-    { image: null, imageSize: { width: 0, height: 0 } },
-  )
+  const imgLoadReducer = createReducer<ImgLoadState, ImgLoadAction>({
+    loaded: (_state, action) => ({ image: action.image, imageSize: { width: action.width, height: action.height } }),
+    clear: () => ({ image: null, imageSize: { width: 0, height: 0 } }),
+  })
+  const [imgLoad, dispatchImgLoad] = useReducer(imgLoadReducer, { image: null, imageSize: { width: 0, height: 0 } })
 
   // UI 状态
   interface UIState {
@@ -84,17 +79,11 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onAppl
     | { type: "setDragOver"; value: boolean }
     | { type: "setToolbarVisible"; value: boolean }
 
-  const [ui, dispatchUI] = useReducer(
-    (state: UIState, action: UIAction): UIState => {
-      switch (action.type) {
-        case "setDragOver":
-          return { ...state, isDragOver: action.value }
-        case "setToolbarVisible":
-          return { ...state, toolbarVisible: action.value }
-      }
-    },
-    { isDragOver: false, toolbarVisible: false },
-  )
+  const uiReducer = createReducer<UIState, UIAction>({
+    setDragOver: (state, action) => ({ ...state, isDragOver: action.value }),
+    setToolbarVisible: (state, action) => ({ ...state, toolbarVisible: action.value }),
+  })
+  const [ui, dispatchUI] = useReducer(uiReducer, { isDragOver: false, toolbarVisible: false })
 
   // 变换状态（旋转/翻转，纯前端预览）
   interface TransformState {
@@ -109,24 +98,14 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onAppl
     | { type: "flipV" }
     | { type: "reset" }
 
-  const transformReducer = (state: TransformState, action: TransformAction): TransformState => {
-    switch (action.type) {
-      case "rotateCW":
-        return { ...state, rotations: (state.rotations + 1) % 4 }
-      case "rotateCCW":
-        return { ...state, rotations: (state.rotations + 3) % 4 }
-      case "flipH":
-        return { ...state, flipH: !state.flipH }
-      case "flipV":
-        return { ...state, flipV: !state.flipV }
-      case "reset":
-        return { rotations: 0, flipH: false, flipV: false }
-    }
-  }
-
-  const [transform, dispatchTransform] = useReducer(transformReducer, {
-    rotations: 0, flipH: false, flipV: false,
+  const transformReducer = createReducer<TransformState, TransformAction>({
+    rotateCW: (state) => ({ ...state, rotations: (state.rotations + 1) % 4 }),
+    rotateCCW: (state) => ({ ...state, rotations: (state.rotations + 3) % 4 }),
+    flipH: (state) => ({ ...state, flipH: !state.flipH }),
+    flipV: (state) => ({ ...state, flipV: !state.flipV }),
+    reset: () => ({ rotations: 0, flipH: false, flipV: false }),
   })
+  const [transform, dispatchTransform] = useReducer(transformReducer, { rotations: 0, flipH: false, flipV: false })
 
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 })
 
