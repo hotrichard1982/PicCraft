@@ -65,6 +65,8 @@
 
 ## 快速开始
 
+项目文档库入口：[docs/index.md](docs/index.md)。开发前可从这里定位架构决策、项目设计、技术栈、测试和操作指南。
+
 ### 前置条件
 - [Node.js](https://nodejs.org/) 18+
 - [Rust](https://www.rust-lang.org/) 1.77+
@@ -146,8 +148,20 @@ PicCraft/
 ├── AGENTS.md                   # AI 开发助手指南
 ├── CONTEXT.md                  # 领域术语表
 └── docs/
-    ├── plans/                  # 实施计划
-    └── adr/                    # 架构决策记录
+    ├── index.md                # 文档库总入口（仅做导航）
+    ├── adr/                    # 架构决策记录
+    ├── prd/                    # 产品需求
+    ├── plan/                   # 实施计划与工作单
+    ├── bug/                    # Bug 记录
+    ├── project/                # 项目架构与数据流
+    ├── technology/             # 技术栈与框架规则
+    ├── knowledge/              # 本地第三方知识
+    ├── database/               # 数据与持久化文档
+    ├── design/                 # UI 与交互设计
+    ├── test/                   # 测试文档
+    ├── audit/                  # 审计报告
+    ├── log/                    # 日志与 Agent 执行数据
+    └── guide/                  # 开发、配置与发布指南
 ```
 
 ---

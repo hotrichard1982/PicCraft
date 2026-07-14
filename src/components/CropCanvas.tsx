@@ -12,6 +12,22 @@ export interface CropRect {
   height: number
 }
 
+// oxlint-disable-next-line react-doctor/only-export-components
+export function calculateOverlayRects( // eslint-disable-line react-refresh/only-export-components
+  stageSize: { width: number; height: number },
+  cropBox: CropRect,
+): [CropRect, CropRect, CropRect, CropRect] {
+  const { width: stageWidth, height: stageHeight } = stageSize
+  const { x, y, width, height } = cropBox
+
+  return [
+    { x: 0, y: 0, width: stageWidth, height: Math.max(0, y) },
+    { x: 0, y: y + height, width: stageWidth, height: Math.max(0, stageHeight - y - height) },
+    { x: 0, y, width: Math.max(0, x), height },
+    { x: x + width, y, width: Math.max(0, stageWidth - x - width), height },
+  ]
+}
+
 interface CropCanvasProps {
   imagePath: string | null
   onCropChange: (rect: CropRect | null) => void
@@ -25,6 +41,7 @@ const MIN_CROP = 5
 const STROKE_COLOR = "#ef4444"
 const STROKE_WIDTH = 2
 const OVERLAY_COLOR = "rgba(0,0,0,0.45)"
+const EMPTY_OVERLAY_RECT: CropRect = { x: 0, y: 0, width: 0, height: 0 }
 const CROP_ANCHORS: string[] = ["top-left", "top-center", "top-right", "middle-left", "middle-right", "bottom-left", "bottom-center", "bottom-right"]
 
 const boundBoxFn = (oldBox: { x: number; y: number; width: number; height: number; rotation: number }, newBox: { x: number; y: number; width: number; height: number; rotation: number }) =>
@@ -261,19 +278,16 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onAppl
     return { x: (sx - o.x) / s, y: (sy - o.y) / s }
   }, [])
 
-  const updateOverlay = useCallback((cx: number, cy: number, cw: number, ch: number) => {
+  const updateOverlay = useCallback((cropBox: CropRect) => {
     const group = overlayRef.current
     if (!group) return
-    const sw = stageSize.width
-    const sh = stageSize.height
 
     const children = group.getChildren() as Konva.Rect[]
     if (children.length < 4) return
 
-    children[0].setAttrs({ x: 0, y: 0, width: sw, height: Math.max(0, cy) })
-    children[1].setAttrs({ x: 0, y: cy + ch, width: sw, height: Math.max(0, sh - cy - ch) })
-    children[2].setAttrs({ x: 0, y: cy, width: Math.max(0, cx), height: ch })
-    children[3].setAttrs({ x: cx + cw, y: cy, width: Math.max(0, sw - cx - cw), height: ch })
+    calculateOverlayRects(stageSize, cropBox).forEach((attrs, index) => {
+      children[index].setAttrs(attrs)
+    })
   }, [stageSize])
 
   const showCropUI = useCallback(() => {
@@ -356,7 +370,7 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onAppl
         const sw = Math.round(w) * s
         const sh = Math.round(h) * s
 
-        updateOverlay(sx, sy, sw, sh)
+        updateOverlay({ x: sx, y: sy, width: sw, height: sh })
 
         if (rectRef.current) {
           rectRef.current.setAttrs({ x: sx, y: sy, width: sw, height: sh })
@@ -451,7 +465,10 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onAppl
   const stageCrop = cropRect ? {
     x: cropRect.x * scale + offsetX,
     y: cropRect.y * scale + offsetY,
+    width: cropRect.width * scale,
+    height: cropRect.height * scale,
   } : null
+  const overlayRects = stageCrop ? calculateOverlayRects(stageSize, stageCrop) : null
 
   const toolbarButtons = [
     { mode: "flip-h" as const, label: "水平翻转", icon: FlipHorizontal },
@@ -524,15 +541,15 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onAppl
           </Layer>
           <Layer>
             <Group ref={overlayRef} visible={false}>
-              <Rect fill={OVERLAY_COLOR} />
-              <Rect fill={OVERLAY_COLOR} />
-              <Rect fill={OVERLAY_COLOR} />
-              <Rect fill={OVERLAY_COLOR} />
+              <Rect {...(overlayRects?.[0] ?? EMPTY_OVERLAY_RECT)} fill={OVERLAY_COLOR} />
+              <Rect {...(overlayRects?.[1] ?? EMPTY_OVERLAY_RECT)} fill={OVERLAY_COLOR} />
+              <Rect {...(overlayRects?.[2] ?? EMPTY_OVERLAY_RECT)} fill={OVERLAY_COLOR} />
+              <Rect {...(overlayRects?.[3] ?? EMPTY_OVERLAY_RECT)} fill={OVERLAY_COLOR} />
             </Group>
 
             <Rect ref={rectRef} visible={false}
               x={stageCrop?.x ?? 0} y={stageCrop?.y ?? 0}
-              width={cropRect ? cropRect.width * scale : 0} height={cropRect ? cropRect.height * scale : 0}
+              width={stageCrop?.width ?? 0} height={stageCrop?.height ?? 0}
               stroke={STROKE_COLOR} strokeWidth={STROKE_WIDTH} strokeScaleEnabled={false}
               draggable onDragEnd={handleDragEnd} onTransformEnd={handleTransformEnd} />
 
