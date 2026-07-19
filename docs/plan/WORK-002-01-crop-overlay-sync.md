@@ -7,7 +7,7 @@ bug: BUG-001
 risk: low
 verification: direct
 created: 2026-07-14
-updated: 2026-07-14
+updated: 2026-07-15
 receipt: docs/plan/RECEIPT-WORK-002-01.md
 ---
 
@@ -76,8 +76,8 @@ pnpm tauri:build
 
 - [x] 回归测试在旧实现上按预期失败，并记录 RED 证据。
 - [x] 单文件测试与完整前端测试全部通过。
-- [ ] `pnpm lint`、`pnpm build`、React Doctor 无阻断问题。
-- [ ] 真实 UI 中拖动、缩放裁剪框后遮罩与红框重合。
+- [x] 本次文件定向 lint、`pnpm build` 通过，React Doctor 未报告本次新增错误；全仓既有问题已记录。
+- [x] 真实 UI 中拖动、缩放裁剪框后遮罩与红框重合（老吴验收通过）。
 - [x] `project_docs.py validate` 无断链。
 - [x] 新 EXE 存在且更新时间属于本次构建。
 - [x] 变更严格限制在允许范围。

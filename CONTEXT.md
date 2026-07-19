@@ -160,15 +160,16 @@
 | 1 | **Konva Canvas + 绝对定位 overlay**：`react-konva` 的 `<Stage>` 内部 div 是 `position: relative`，作为同级定位元素在 DOM 后面出现时会盖在 overlay 之上。全屏看图的工具条、信息卡、加载提示、错误提示**一律要加 `z-10`** | 全屏工具条不可点击 |
 | 2 | **Tauri 2 CSP scheme `http://` vs `https://`**：`convertFileSrc` 生成 `http://asset.localhost`（HTTP），并非 HTTPS。CSP `img-src 'self' https://asset.localhost` 不覆盖 HTTP。正确写法：`asset: http://asset.localhost https://asset.localhost` | 编译版全屏黑屏 |
 | 3 | **静默吞错 = 自盲**：`img.onerror` 无 `console.error`、无 UI error state → 用户面对黑屏零反馈。每个错误回调必须同时有日志 + UI 提示 | 编译版全屏黑屏 |
+| 4 | **Konva 命令式节点与 React 属性必须共用坐标来源**：拖画阶段可通过 ref 即时更新，但拖动、Transformer 缩放和容器 resize 后必须由同一个纯计算重新生成节点属性；禁止让裁剪框和遮罩各维护一份坐标 | BUG-001 单图裁剪遮罩不同步 |
 
 ### 架构教训
 
 | # | 教训 | 来源 |
 |---|------|------|
-| 4 | **Rust 函数定义顺序不影响编译**：Rust 模块内函数定义在后、调用在前完全合法——不需要前向声明。`parse_from_iter` 在第 140 行定义、第 79 行调用，编译通过 | "Issue 1" 误报 |
-| 5 | **`#[tauri::command]` + 同文件冲突**：Tauri 2 的 `#[tauri::command]` 宏会生成 `__cmd__X` 内部宏，与同文件其他 `generate_handler!` 引用冲突。解法：把有冲突的命令放 `image_ops` 子模块，用 `use crate::image_ops::xxx` 跨模块引用 | M1-A 编译踩坑 |
-| 6 | **`SearchReplace` 工具不稳定**：报告"successfully"但实际文件未改。**必须 Read 验证每次 SearchReplace 的结果**。确实不稳定时用 `PowerShell -replace` 或 `Write` 整个文件 | M1-M4 多次踩坑 |
-| 7 | **`Write` 工具截断**：超过一定长度（约 400 行）时 Write 会截断文件末尾。超长文件需 `Write` 后 `Add-Content` 续写 | M6-B 文件损坏 |
+| 5 | **Rust 函数定义顺序不影响编译**：Rust 模块内函数定义在后、调用在前完全合法——不需要前向声明。`parse_from_iter` 在第 140 行定义、第 79 行调用，编译通过 | "Issue 1" 误报 |
+| 6 | **`#[tauri::command]` + 同文件冲突**：Tauri 2 的 `#[tauri::command]` 宏会生成 `__cmd__X` 内部宏，与同文件其他 `generate_handler!` 引用冲突。解法：把有冲突的命令放 `image_ops` 子模块，用 `use crate::image_ops::xxx` 跨模块引用 | M1-A 编译踩坑 |
+| 7 | **`SearchReplace` 工具不稳定**：报告"successfully"但实际文件未改。**必须 Read 验证每次 SearchReplace 的结果**。确实不稳定时用 `PowerShell -replace` 或 `Write` 整个文件 | M1-M4 多次踩坑 |
+| 8 | **`Write` 工具截断**：超过一定长度（约 400 行）时 Write 会截断文件末尾。超长文件需 `Write` 后 `Add-Content` 续写 | M6-B 文件损坏 |
 
 ## 10. 不在范围 (Out of Scope)
 
