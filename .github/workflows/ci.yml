@@ -57,3 +57,109 @@ jobs:
 
       - name: 文档索引检查
         run: python tools/project_docs.py index check
+
+  macos:
+    # macOS 质量门禁 + 双架构 DMG 构建（WORK-004-04）
+    # 原生 runner 按架构构建：macos-14 = Apple Silicon(arm64)，macos-13 = Intel(x64)
+    # 不签名、不公证、不创建 Release、不打 tag、无 secrets
+    name: macOS 质量门禁 (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+          - arch: x64
+            runner: macos-13
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 pnpm（读 packageManager 锁定版本）
+        uses: pnpm/action-setup@v4
+
+      - name: 安装 Node（读 .nvmrc）
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: 安装依赖（frozen lockfile，可复现）
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: 前端测试
+        run: pnpm test
+
+      - name: 构建
+        run: pnpm build
+
+      - name: 安装 Rust 工具链（与 rust-toolchain.toml 一致）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+
+      - name: Rust 测试（--locked 确认 Cargo.lock 未变）
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      - name: 文档链接校验
+        run: python tools/project_docs.py validate
+
+      - name: 文档索引检查
+        run: python tools/project_docs.py index check
+
+      - name: 构建 macOS DMG（tauri.macos.conf.json 自动合并）
+        run: npx tauri build
+
+      - name: 验证产物架构
+        run: |
+          BIN="src-tauri/target/release/bundle/macos/piccarft.app/Contents/MacOS/piccarft"
+          ARCHS=$(lipo -archs "$BIN")
+          echo "二进制架构: $ARCHS"
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            [[ "$ARCHS" == *"arm64"* ]] || { echo "::error::产物架构不符合 arm64"; exit 1; }
+          else
+            [[ "$ARCHS" == *"x86_64"* ]] || { echo "::error::产物架构不符合 x86_64"; exit 1; }
+          fi
+
+      - name: 重命名 DMG（命名含架构）
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          mv src-tauri/target/release/bundle/dmg/*.dmg "PicCraft_${VERSION}_${{ matrix.arch }}.dmg"
+          ls -lh PicCraft_*.dmg
+
+      - name: 断言 DMG 内 Info.plist（identifier + 文件关联）
+        run: |
+          DMG=$(ls PicCraft_*.dmg)
+          ATTACH=$(hdiutil attach -nobrowse -readonly "$DMG")
+          MOUNT=$(printf '%s\n' "$ATTACH" | grep -o '/Volumes/.*' | head -1)
+          echo "挂载点: $MOUNT"
+          APP=$(find "$MOUNT" -maxdepth 1 -name "*.app" | head -1)
+          [ -n "$APP" ] || { echo "::error::DMG 内未找到 .app"; exit 1; }
+          MOUNT="$MOUNT" APP="$APP" python - <<'EOF'
+          import os, plistlib
+          mount, app = os.environ["MOUNT"], os.environ["APP"]
+          with open(os.path.join(app, "Contents", "Info.plist"), "rb") as f:
+              plist = plistlib.load(f)
+          bundle_id = plist.get("CFBundleIdentifier")
+          print("CFBundleIdentifier =", bundle_id)
+          assert bundle_id == "com.cq30.piccarft", f"identifier 不符: {bundle_id}"
+          exts = set()
+          for doc_type in plist.get("CFBundleDocumentTypes", []):
+              exts.update(doc_type.get("CFBundleTypeExtensions", []))
+          print("CFBundleTypeExtensions =", sorted(exts))
+          assert exts & {"jpg", "jpeg", "png", "webp", "bmp"}, f"文件关联缺失: {sorted(exts)}"
+          print("Info.plist 断言通过")
+          EOF
+          hdiutil detach "$MOUNT"
+
+      - name: 上传 DMG Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: piccarft-dmg-${{ matrix.arch }}
+          path: PicCraft_*.dmg
+          if-no-files-found: error
