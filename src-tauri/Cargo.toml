@@ -1,6 +1,6 @@
 [package]
 name = "piccarft"
-version = "0.2.0"
+version = "0.3.0"
 description = "图轻剪 PicCraft - 图片处理工具"
 authors = ["重庆三人众科技有限公司"]
 license = "MIT"

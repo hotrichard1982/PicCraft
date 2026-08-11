@@ -1,8 +1,10 @@
-// Windows 发布构建辅助脚本（WORK-003-05）
-// MSVC / Windows SDK 路径不再硬编码版本号，按以下顺序解析：
+// 发布构建辅助脚本（Windows: WORK-003-05；macOS: WORK-004-03）
+// Windows 路径：MSVC / Windows SDK 路径不再硬编码版本号，按以下顺序解析：
 //   1. 已配置 VS Developer 环境（VsDevCmd.bat / Developer PowerShell / CI msvc-dev-cmd action）→ 直接继承
 //   2. 用 vswhere 定位 VS 安装，枚举最新 MSVC 与 Windows SDK 版本目录
 //   3. 均失败 → 明确报错并给出安装指引（不再静默回退系统 PATH，避免用错编译器产出坏产物）
+// macOS 路径：tauri build 自动合并 src-tauri/tauri.macos.conf.json（Tauri 2 CLI 内建平台配置合并），
+//   产物 .app 与 bundle/dmg 拷贝到 dist/；真实 DMG 与 Info.plist 断言由 WORK-004-04 macOS CI 验证。
 import { execSync } from "child_process"
 import { cpSync, mkdirSync, existsSync, readdirSync } from "fs"
 import { resolve, join } from "path"
@@ -92,7 +94,39 @@ export function resolveToolchainEnv() {
   }
 }
 
+// macOS 构建分支（WORK-004-03）：tauri build 自动合并 tauri.macos.conf.json，
+// 拷贝 .app 与 bundle/dmg 到 dist/。
+function buildMacOS() {
+  console.log("🔨 Building PicCraft (macOS)...")
+  execSync("npx tauri build", { cwd: root, stdio: "inherit" })
+
+  const distDir = join(root, "dist")
+  const releaseDir = join(srcTauri, "target", "release")
+  const bundleDir = join(releaseDir, "bundle")
+
+  mkdirSync(distDir, { recursive: true })
+
+  const appPath = join(releaseDir, "piccarft.app")
+  if (existsSync(appPath)) {
+    cpSync(appPath, join(distDir, "piccarft.app"), { recursive: true })
+    console.log("✅ piccarft.app → dist/")
+  }
+
+  const dmgDir = join(bundleDir, "dmg")
+  if (existsSync(dmgDir)) {
+    const dest = join(distDir, "dmg")
+    mkdirSync(dest, { recursive: true })
+    cpSync(dmgDir, dest, { recursive: true })
+    console.log("✅ bundle/dmg/ → dist/dmg/")
+  }
+}
+
 function main() {
+  if (process.platform === "darwin") {
+    buildMacOS()
+    return
+  }
+
   const env = resolveToolchainEnv()
 
   console.log("🔨 Building PicCraft...")

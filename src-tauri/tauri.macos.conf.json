@@ -1,0 +1,39 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "identifier": "com.cq30.piccarft",
+  "bundle": {
+    "targets": ["dmg"],
+    "category": "Photography",
+    "shortDescription": "图轻剪 PicCraft - 图片处理工具",
+    "longDescription": "图轻剪 PicCraft 是一款轻量图片处理工具，支持目录浏览、单图编辑与批量编辑，内置多种格式转换与压缩能力。",
+    "fileAssociations": [
+      {
+        "ext": ["jpg", "jpeg"],
+        "mimeType": "image/jpeg",
+        "name": "JPEG Image",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["png"],
+        "mimeType": "image/png",
+        "name": "PNG Image",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["webp"],
+        "mimeType": "image/webp",
+        "name": "WebP Image",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["bmp"],
+        "mimeType": "image/bmp",
+        "name": "BMP Image",
+        "role": "Viewer"
+      }
+    ],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
+  }
+}
