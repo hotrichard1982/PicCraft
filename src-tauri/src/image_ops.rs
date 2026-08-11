@@ -550,6 +550,8 @@ fn check_file_size_path(path: &Path) -> Result<(), String> {
 
 /// 判断 path_ref 是否位于 temp 目录下（分别比较 canonicalized 与原始两种形式，
 /// 容忍 8.3 短名差异：path 经 canonicalize 展开为长名，temp_dir() 可能返回短名）
+/// macOS 构建下不被生产代码引用（macOS 分支走 is_sensitive_macos_path），仅测试模块使用
+#[cfg(any(not(target_os = "macos"), test))]
 fn is_under_temp_dir(path_ref: &str, temp_raw_ref: &str, temp_canon_ref: &str) -> bool {
     let canon_base = temp_canon_ref.strip_suffix('\\').unwrap_or(temp_canon_ref);
     if !canon_base.is_empty()
@@ -564,44 +566,109 @@ fn is_under_temp_dir(path_ref: &str, temp_raw_ref: &str, temp_canon_ref: &str) -
 
 /// 检查路径是否属于系统敏感目录
 fn is_sensitive_path(path: &str) -> bool {
-    let canonical = std::fs::canonicalize(path)
-        .unwrap_or_else(|_| PathBuf::from(path));
-    let path_str = canonical.to_string_lossy().to_lowercase();
-    // 去除 Windows UNC 前缀（\\?\）
-    let path_ref = path_str.strip_prefix(r"\\?\").unwrap_or(&path_str);
+    #[cfg(target_os = "macos")]
+    {
+        // macOS：平台无关纯函数判定（大小写不敏感，见 is_sensitive_macos_path）。
+        // canonicalize 与 Windows 分支同构：解析符号链接（如 /var → /private/var）后按字符串判定
+        let canonical = std::fs::canonicalize(path)
+            .unwrap_or_else(|_| PathBuf::from(path));
+        return is_sensitive_macos_path(&canonical.to_string_lossy());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let canonical = std::fs::canonicalize(path)
+            .unwrap_or_else(|_| PathBuf::from(path));
+        let path_str = canonical.to_string_lossy().to_lowercase();
+        // 去除 Windows UNC 前缀（\\?\）
+        let path_ref = path_str.strip_prefix(r"\\?\").unwrap_or(&path_str);
 
-    // 系统临时目录豁免（temp 目录自身及其子路径）。
-    // canonicalize 会把路径展开为长名（8.3 短名展开），而 temp_dir() 可能返回短名
-    // （如 GitHub Actions runner 的 RUNNER~1），故同时比较两种形式，任一匹配即放行
-    let temp_dir_raw = std::env::temp_dir();
-    let temp_canon = std::fs::canonicalize(&temp_dir_raw)
-        .unwrap_or_else(|_| temp_dir_raw.clone());
-    let norm = |p: &PathBuf| -> String {
-        let s = p.to_string_lossy().to_lowercase();
-        s.strip_prefix(r"\\?\").unwrap_or(&s).to_string()
-    };
-    let temp_raw_ref = norm(&temp_dir_raw);
-    let temp_canon_ref = norm(&temp_canon);
-    if is_under_temp_dir(path_ref, &temp_raw_ref, &temp_canon_ref) {
+        // 系统临时目录豁免（temp 目录自身及其子路径）。
+        // canonicalize 会把路径展开为长名（8.3 短名展开），而 temp_dir() 可能返回短名
+        // （如 GitHub Actions runner 的 RUNNER~1），故同时比较两种形式，任一匹配即放行
+        let temp_dir_raw = std::env::temp_dir();
+        let temp_canon = std::fs::canonicalize(&temp_dir_raw)
+            .unwrap_or_else(|_| temp_dir_raw.clone());
+        let norm = |p: &PathBuf| -> String {
+            let s = p.to_string_lossy().to_lowercase();
+            s.strip_prefix(r"\\?\").unwrap_or(&s).to_string()
+        };
+        let temp_raw_ref = norm(&temp_dir_raw);
+        let temp_canon_ref = norm(&temp_canon);
+        if is_under_temp_dir(path_ref, &temp_raw_ref, &temp_canon_ref) {
+            return false;
+        }
+
+        // Windows 敏感目录
+        let sensitive_prefixes = [
+            r"c:\windows",
+            r"c:\program files",
+            r"c:\program files (x86)",
+        ];
+        for prefix in &sensitive_prefixes {
+            if path_ref.starts_with(prefix) {
+                return true;
+            }
+        }
+        // AppData 目录（所有用户）
+        if path_ref.contains(r"\appdata\") {
+            return true;
+        }
+        false
+    }
+}
+
+/// macOS 敏感路径判定（平台无关纯函数，字符串级，大小写不敏感）。
+///
+/// 规则（PRD-002）：
+/// - 禁止：`/System`、`/Library`、`/private`、用户 Library（`~/Library` 与 `/Users/<user>/Library` 两种形式）
+/// - 允许：用户普通目录（`/Users/<user>/**` 除 Library）、`/Applications`、用户临时目录
+///   （`/var/folders/...`，即 `std::env::temp_dir()` 所在；macOS 上 `/var` 是 `/private/var` 的
+///   符号链接，canonicalize 后为 `/private/var/folders/...`，两种前缀均放行）
+/// - macOS 默认文件系统大小写不敏感，路径一律按小写匹配；不套 Windows 的 `\appdata\` 规则
+#[cfg(any(target_os = "macos", test))]
+fn is_sensitive_macos_path(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    let p = lower.strip_suffix('/').unwrap_or(&lower);
+
+    // 用户临时目录豁免（先于 /private 规则：/private/var/folders 位于禁止前缀之下，必须优先放行）
+    if p == "/var/folders"
+        || p.starts_with("/var/folders/")
+        || p == "/private/var/folders"
+        || p.starts_with("/private/var/folders/")
+    {
         return false;
     }
 
-    // Windows 敏感目录
-    let sensitive_prefixes = [
-        r"c:\windows",
-        r"c:\program files",
-        r"c:\program files (x86)",
-    ];
-    for prefix in &sensitive_prefixes {
-        if path_ref.starts_with(prefix) {
-            return true;
-        }
-    }
-    // AppData 目录（所有用户）
-    if path_ref.contains(r"\appdata\") {
+    // 系统级敏感目录
+    if p == "/system" || p.starts_with("/system/") {
         return true;
     }
-    false
+    if p == "/library" || p.starts_with("/library/") {
+        return true;
+    }
+    if p == "/private" || p.starts_with("/private/") {
+        return true;
+    }
+
+    // 用户主目录语义：~/ 或 /Users/<user>/，仅其下的 Library 目录敏感
+    let home_rest: Option<&str> = if p == "~" || p.starts_with("~/") {
+        p.strip_prefix("~/").or(Some(""))
+    } else if let Some(rest) = p.strip_prefix("/users/") {
+        // /Users/<user>/... → 去掉用户名段，只留其后部分
+        rest.split_once('/').map(|(_, r)| r)
+    } else {
+        None
+    };
+    match home_rest {
+        Some(rest) => {
+            if rest.is_empty() {
+                // ~ 自身与 /Users/<user> 自身：用户主目录，放行
+                return false;
+            }
+            rest.split('/').next() == Some("library")
+        }
+        None => false, // /Applications 等其它路径不命中任何禁止规则
+    }
 }
 
 fn save_to_temp(img: &DynamicImage, path: &PathBuf) -> Result<(), String> {
@@ -1846,5 +1913,66 @@ mod tests {
             warned.contains("已跳过"),
             "警告应明确其余图片被跳过: {warned}"
         );
+    }
+
+    // ─── WORK-004-01 新增：macOS 安全路径规则（平台无关纯函数，Windows 上可完整单测）───
+
+    #[test]
+    fn test_is_sensitive_macos_rejects_system_dirs() {
+        // 系统级敏感目录：/System、/Library、/private（含其子路径）
+        assert!(is_sensitive_macos_path("/System"));
+        assert!(is_sensitive_macos_path("/System/Library/CoreServices/Finder.app"));
+        assert!(is_sensitive_macos_path("/Library"));
+        assert!(is_sensitive_macos_path("/Library/Application Support/foo"));
+        assert!(is_sensitive_macos_path("/private"));
+        assert!(is_sensitive_macos_path("/private/etc/passwd"));
+        assert!(is_sensitive_macos_path("/private/var/db/foo"));
+    }
+
+    #[test]
+    fn test_is_sensitive_macos_rejects_user_library() {
+        // 用户主目录下的 Library：/Users/<user>/Library 与 ~/Library 两种形式
+        assert!(is_sensitive_macos_path("/Users/alice/Library"));
+        assert!(is_sensitive_macos_path("/Users/alice/Library/Application Support/foo"));
+        assert!(is_sensitive_macos_path("/Users/alice/Library/Safari/bookmarks.plist"));
+        assert!(is_sensitive_macos_path("~/Library"));
+        assert!(is_sensitive_macos_path("~/Library/Caches/foo"));
+    }
+
+    #[test]
+    fn test_is_sensitive_macos_allows_user_dirs() {
+        // 用户普通目录与主目录本身：放行
+        assert!(!is_sensitive_macos_path("/Users"));
+        assert!(!is_sensitive_macos_path("/Users/alice"));
+        assert!(!is_sensitive_macos_path("/Users/alice/Pictures/photo.jpg"));
+        assert!(!is_sensitive_macos_path("/Users/alice/Documents/foo.txt"));
+        assert!(!is_sensitive_macos_path("~"));
+        assert!(!is_sensitive_macos_path("~/Pictures/photo.jpg"));
+    }
+
+    #[test]
+    fn test_is_sensitive_macos_allows_applications_and_temp() {
+        // /Applications 与用户临时目录（/var/folders/...，canonicalize 后为 /private/var/folders/...）放行
+        assert!(!is_sensitive_macos_path("/Applications"));
+        assert!(!is_sensitive_macos_path("/Applications/Utilities/Terminal.app"));
+        assert!(!is_sensitive_macos_path("/var/folders"));
+        assert!(!is_sensitive_macos_path("/var/folders/ab/cd/T/"));
+        assert!(!is_sensitive_macos_path("/var/folders/ab/cd/T/piccraft_x.png"));
+        assert!(!is_sensitive_macos_path("/private/var/folders/ab/cd/T/piccraft_x.png"));
+    }
+
+    #[test]
+    fn test_is_sensitive_macos_case_insensitive() {
+        // macOS 默认文件系统大小写不敏感：/system、/LIBRARY 等大小写变体同样命中规则
+        assert!(is_sensitive_macos_path("/system"));
+        assert!(is_sensitive_macos_path("/SYSTEM"));
+        assert!(is_sensitive_macos_path("/LIBRARY"));
+        assert!(is_sensitive_macos_path("/System/Library"));
+        assert!(is_sensitive_macos_path("/PRIVATE"));
+        assert!(is_sensitive_macos_path("/USERS/ALICE/LIBRARY"));
+        assert!(is_sensitive_macos_path("~/Library"));
+        assert!(!is_sensitive_macos_path("/USERS/ALICE/PICTURES/A.PNG"));
+        assert!(!is_sensitive_macos_path("/Applications"));
+        assert!(!is_sensitive_macos_path("/VAR/FOLDERS/AB/CD/T/X.PNG"));
     }
 }

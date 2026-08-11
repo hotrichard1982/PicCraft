@@ -106,8 +106,24 @@ pub fn run() {
             register_file_assoc,
         ])
 
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // macOS：Finder 双击打开文件（RunEvent::Opened 变体仅存在于
+            // macOS/iOS/Android 编译目标，见 tauri 源码 cfg）。
+            // 第二个实例被 Finder 触发时，tauri-plugin-single-instance 会拦截启动并
+            // 在回调中转发 argv；已运行实例的 Opened 事件在此经同一链路处理
+            // （更新 State + emit 前端 + 焦点）。
+            #[cfg(target_os = "macos")]
+            {
+                if let tauri::RunEvent::Opened { urls } = event {
+                    handle_finder_opened(app_handle, urls);
+                    return;
+                }
+            }
+            // 其它事件（及非 macOS 平台的全部事件）：忽略
+            let _ = (app_handle, event);
+        });
 }
 
 /// Tauri State 容器：Mutex 包一层让 single-instance 转发能 mutate
@@ -157,6 +173,57 @@ where
     S: AsRef<str>,
 {
     parse_args_from_strings(iter)
+}
+
+/// 从 Finder 打开事件的 URL 列表提取本地路径（仅 `file://` 生效，保持原顺序；
+/// 非 file scheme 或无效 file URL 被过滤，防御性处理）。
+/// 平台无关纯函数：Windows 测试构建中可完整单测 URL 解析链路
+#[cfg(any(target_os = "macos", test))]
+fn urls_to_paths(urls: &[tauri::Url]) -> Vec<String> {
+    urls.iter()
+        .filter_map(|u| u.to_file_path().ok())
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect()
+}
+
+/// Finder 打开事件 → 启动参数：与 argv 解析复用同一语义（Browse 路由）
+/// - 单文件 → Browse + file（对应现有单图参数语义：前端定位该图）
+/// - 多文件 → 只取第一个路径（前端按第一张图片所在目录浏览；完整数组另行 emit 给前端）
+/// - 目录 → Browse + folder（复用 parse_args_from_strings 的 is_dir 语义）
+#[cfg(any(target_os = "macos", test))]
+fn parse_opened_urls(urls: &[tauri::Url]) -> StartupArgs {
+    let paths = urls_to_paths(urls);
+    parse_args_from_strings(paths.into_iter().take(1))
+}
+
+/// Finder 打开事件处理：URL → 路径 → StartupArgs → 更新 State + emit 事件 + 焦点。
+/// 与 single-instance argv 转发同一链路；与前端约定事件名 `finder-opened`，
+/// payload 为完整路径数组（`Vec<String>`，原顺序，前端按第一张图片定位目录）。
+/// 仅 macOS 编译（事件本身平台专属）；解析逻辑在 urls_to_paths / parse_opened_urls 上单测
+#[cfg(target_os = "macos")]
+fn handle_finder_opened(app: &tauri::AppHandle, urls: Vec<tauri::Url>) {
+    let paths = urls_to_paths(&urls);
+    if paths.is_empty() {
+        return;
+    }
+    let new_args = parse_opened_urls(&urls);
+
+    // 更新 State（与 single-instance 回调一致）
+    let state = app.state::<StartupArgsInner>();
+    {
+        let mut guard = state.0.lock().expect("StartupArgs mutex poisoned");
+        *guard = new_args.clone();
+    }
+
+    // 通知前端
+    let _ = app.emit("finder-opened", &paths);
+
+    // 焦点回到主窗口
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
 }
 
 #[cfg(test)]
@@ -212,5 +279,109 @@ mod tests {
         let result = parse_from_iter(args.into_iter());
         assert_eq!(result.mode, StartupMode::Edit);
         assert_eq!(result.file, Some("C:/img.jpg".to_string()));
+    }
+
+    // ─── WORK-004-01 新增：Finder 打开事件（RunEvent::Opened）URL 解析 ───
+
+    fn test_url(s: &str) -> tauri::Url {
+        tauri::Url::parse(s).expect("测试 URL 应可解析")
+    }
+
+    #[test]
+    fn test_urls_to_paths_single_file() {
+        let urls = vec![test_url("file:///C:/Photos/a.png")];
+        assert_eq!(
+            urls_to_paths(&urls),
+            vec![r"C:\Photos\a.png".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_urls_to_paths_multiple_keeps_order() {
+        let urls = vec![
+            test_url("file:///C:/Photos/a.png"),
+            test_url("file:///C:/Photos/b.png"),
+        ];
+        assert_eq!(
+            urls_to_paths(&urls),
+            vec![r"C:\Photos\a.png".to_string(), r"C:\Photos\b.png".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_urls_to_paths_percent_encoded() {
+        let urls = vec![test_url("file:///C:/Photos/My%20Pics/a%20b.png")];
+        assert_eq!(
+            urls_to_paths(&urls),
+            vec![r"C:\Photos\My Pics\a b.png".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_urls_to_paths_filters_non_file_scheme() {
+        // 非 file:// 的 URL（Finder 理论上只给 file://，防御性过滤）不产出路径
+        let urls = vec![
+            test_url("https://example.com/x.png"),
+            test_url("file:///C:/Photos/a.png"),
+        ];
+        assert_eq!(urls_to_paths(&urls), vec![r"C:\Photos\a.png".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_opened_urls_single_file_browse() {
+        // 单文件 → Browse + file（与 argv 单图参数同一语义：前端定位该图）
+        let urls = vec![test_url("file:///C:/Photos/a.png")];
+        let args = parse_opened_urls(&urls);
+        assert_eq!(args.mode, StartupMode::Browse);
+        assert_eq!(args.file, Some(r"C:\Photos\a.png".to_string()));
+        assert!(args.folder.is_none());
+    }
+
+    #[test]
+    fn test_parse_opened_urls_multiple_takes_first() {
+        // 多文件 → 只按第一张图片所在目录浏览：只取第一个路径
+        let urls = vec![
+            test_url("file:///C:/Photos/a.png"),
+            test_url("file:///C:/Photos/b.png"),
+        ];
+        let args = parse_opened_urls(&urls);
+        assert_eq!(args.mode, StartupMode::Browse);
+        assert_eq!(args.file, Some(r"C:\Photos\a.png".to_string()));
+    }
+
+    #[test]
+    fn test_parse_opened_urls_non_image_file() {
+        // 非图片文件：与 argv 语义一致，不校验扩展名，仍走 Browse 定位
+        let urls = vec![test_url("file:///C:/Photos/notes.txt")];
+        let args = parse_opened_urls(&urls);
+        assert_eq!(args.mode, StartupMode::Browse);
+        assert_eq!(args.file, Some(r"C:\Photos\notes.txt".to_string()));
+    }
+
+    #[test]
+    fn test_parse_opened_urls_directory() {
+        // 目录 URL → Browse + folder（复用 parse_args_from_strings 的 is_dir 语义；用真实临时目录构造）
+        let dir = std::env::temp_dir();
+        let url = tauri::Url::from_file_path(&dir).expect("临时目录应能构造 file URL");
+        let args = parse_opened_urls(std::slice::from_ref(&url));
+        assert_eq!(args.mode, StartupMode::Browse);
+        assert!(args.file.is_none());
+        let expected = dir.to_string_lossy().trim_end_matches('\\').to_string();
+        assert_eq!(args.folder, Some(expected));
+    }
+
+    #[test]
+    fn test_parse_opened_urls_empty_is_cold() {
+        // 无 URL 或全部被过滤 → Cold（默认启动）
+        let args = parse_opened_urls(&[]);
+        assert_eq!(args.mode, StartupMode::Cold);
+        assert!(args.file.is_none());
+        assert!(args.folder.is_none());
+
+        let urls = vec![test_url("https://example.com/x.png")];
+        let args = parse_opened_urls(&urls);
+        assert_eq!(args.mode, StartupMode::Cold);
+        assert!(args.file.is_none());
+        assert!(args.folder.is_none());
     }
 }
