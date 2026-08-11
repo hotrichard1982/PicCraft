@@ -24,7 +24,7 @@ function SettingsSubTab() {
   const setSettings = useAppStore((s) => s.setSettings)
 
   // 本地暂存，点击保存后才写入 store
-  const [draft, setDraft] = useState<Set<string>>(new Set(fileAssoc))
+  const [draft, setDraft] = useState<Set<string>>(() => new Set(fileAssoc))
   const [saved, setSaved] = useState(false)
 
   const toggle = useCallback((ext: string) => {
@@ -43,7 +43,8 @@ function SettingsSubTab() {
     setTimeout(() => setSaved(false), 2000)
   }, [draft, setSettings])
 
-  const isDirty = draft.size !== fileAssoc.length || [...draft].some((e) => !fileAssoc.includes(e))
+  const fileAssocSet = new Set(fileAssoc)
+  const isDirty = draft.size !== fileAssoc.length || [...draft].some((e) => !fileAssocSet.has(e))
 
   return (
     <div className="flex justify-center pt-8 px-6 pb-8">
@@ -69,7 +70,6 @@ function SettingsSubTab() {
               return (
                 <label
                   key={ext}
-                  onClick={() => toggle(ext)}
                   className={
                     "flex items-center gap-3 px-4 py-3 rounded-lg border transition-all cursor-pointer select-none " +
                     (checked
@@ -77,6 +77,12 @@ function SettingsSubTab() {
                       : "border-border hover:border-muted-foreground/40")
                   }
                 >
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={checked}
+                    onChange={() => toggle(ext)}
+                  />
                   <span
                     className={
                       "size-5 rounded border-2 flex items-center justify-center transition-colors " +
@@ -176,7 +182,7 @@ function AboutSubTab() {
 
       <div className="text-center">
         <h2 className="text-2xl font-bold">图轻剪 PicCraft</h2>
-        <p className="text-sm text-muted-foreground mt-1">v2026.06</p>
+        <p className="text-sm text-muted-foreground mt-1">v0.2.0</p>
       </div>
 
       <Separator />

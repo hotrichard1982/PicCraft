@@ -1,0 +1,3 @@
+# Rust 工具链锁定（WORK-003-01），CI 与本地保持一致
+[toolchain]
+channel = "1.97.1"

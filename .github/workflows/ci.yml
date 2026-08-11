@@ -1,0 +1,59 @@
+# Windows 质量门禁 CI（WORK-003-05）
+# 仅验证：lint / test / doctor / build / cargo test --locked / 文档 validate / 文档 index check。
+# 无发布步骤：不创建 Release、不推送 tag、不上传产物、不读取任何 secrets。
+# 版本锁定来源（WORK-003-01，勿在此复制版本号之外的配置）：
+#   Node  → .nvmrc（setup-node node-version-file）
+#   pnpm  → package.json packageManager（pnpm/action-setup 自动读取）
+#   Rust  → rust-toolchain.toml（dtolnay/rust-toolchain 显式对齐 1.97.1）
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  quality:
+    name: Windows 质量门禁
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 pnpm（读 packageManager 锁定版本）
+        uses: pnpm/action-setup@v4
+
+      - name: 安装 Node（读 .nvmrc）
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: 安装依赖（frozen lockfile，可复现）
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: 前端测试
+        run: pnpm test
+
+      - name: react-doctor（静态检查质量门禁）
+        run: pnpm run doctor
+
+      - name: 构建
+        run: pnpm build
+
+      - name: 安装 Rust 工具链（与 rust-toolchain.toml 一致）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+
+      - name: Rust 测试（--locked 确认 Cargo.lock 未变）
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      - name: 文档链接校验
+        run: python tools/project_docs.py validate
+
+      - name: 文档索引检查
+        run: python tools/project_docs.py index check

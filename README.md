@@ -2,7 +2,7 @@
 
 模块化桌面图片处理工具 — 浏览、挑选、单张/批量编辑一体化工作流。
 
-**v0.1.0 (2026.06)** · Rust + Tauri v2 · React 19 · TypeScript · Tailwind CSS · Konva.js · 明暗双主题
+**v0.2.0 (2026.08)** · Rust + Tauri v2 · React 19 · TypeScript · Tailwind CSS · Konva.js · 明暗双主题
 
 **重庆三人众科技有限公司** | QQ: 7602069 | 邮箱: 7602069@qq.com | [官网](https://www.cq30.com/)
 
@@ -42,7 +42,7 @@
 - 按目标宽度等比缩放（Lanczos3），异步处理（tokio），进度实时显示
 - 保留旧 `batch_process` 命令（向后兼容）
 - JPEG 压缩质量可调（1-100）
-- 输出目录持久化（localStorage）
+- 输出目录持久化（Tauri Store，tauri-plugin-store）
 
 ### 设置视图
 - 3 子 Tab：设置 / 帮助 / 关于
@@ -68,8 +68,13 @@
 项目文档库入口：[docs/index.md](docs/index.md)。开发前可从这里定位架构决策、项目设计、技术栈、测试和操作指南。
 
 ### 前置条件
-- [Node.js](https://nodejs.org/) 18+
-- [Rust](https://www.rust-lang.org/) 1.77+
+
+版本由仓库声明文件锁定（`.nvmrc` / `package.json` 的 `engines` 与 `packageManager` / `rust-toolchain.toml`），安装指引如下：
+
+- [Node.js](https://nodejs.org/) 24.14.0（见 `.nvmrc`；推荐用 [nvm-windows](https://github.com/coreybutler/nvm-windows) 管理，`nvm install` 后 `nvm use`）
+- [pnpm](https://pnpm.io/) 11.18.0（与 `package.json` 的 `packageManager` 一致；Node 自带 corepack：`corepack enable && corepack prepare pnpm@11.18.0 --activate`）
+- [Rust](https://www.rust-lang.org/) stable MSVC（见 `rust-toolchain.toml`；用 [rustup](https://rustup.rs/) 安装：`rustup-init.exe` 或 `winget install Rustlang.Rustup`）
+- Windows 构建环境：[Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) 的"使用 C++ 的桌面开发"工作负载（含 MSVC 与 Windows SDK），用 `winget install Microsoft.VisualStudio.2022.BuildTools` 安装并勾选 C++ 工作负载
 
 ### 开发（热更新）
 
@@ -86,6 +91,8 @@ pnpm tauri dev
 pnpm tauri build
 ```
 
+构建脚本 `scripts/copy-dist.mjs` 自动探测本机 Visual Studio Build Tools 的 MSVC 与 Windows SDK 版本并组装编译环境（优先继承 VsDevCmd / Developer PowerShell 环境，否则用 vswhere 定位最新版本，找不到时给出 `winget install Microsoft.VisualStudio.2022.BuildTools` 指引），无需手写版本路径。
+
 输出：
 - `src-tauri/target/release/piccarft.exe` — 主程序
 - `src-tauri/target/release/bundle/msi/` — MSI 安装包
@@ -98,6 +105,22 @@ node scripts/release.mjs
 ```
 
 自动打 tag → 编译 → 创建 GitHub Release → 上传 exe / MSI / NSIS。
+
+### 质量门禁（CI）
+
+推送 / PR 时 [.github/workflows/ci.yml](.github/workflows/ci.yml) 自动在 Windows 上运行全部门禁：
+`pnpm lint` → `pnpm test` → `pnpm build` → `cargo test --locked` → 文档链接与索引校验。
+CI 只做质量门禁：不创建 Release、不推送 tag、不上传产物、不读取 secrets。
+版本锁定来源：`.nvmrc`（Node 24.14.0）、`package.json` 的 `packageManager`（pnpm 11.18.0）、`rust-toolchain.toml`（Rust 1.97.1）。
+
+本地等效验证：
+
+```bash
+pnpm lint && pnpm test && pnpm build
+cd src-tauri && cargo test --locked
+python tools/project_docs.py validate
+python tools/project_docs.py index check
+```
 
 ### 仅前端开发（不启动 Rust 后端）
 

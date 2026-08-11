@@ -22,6 +22,11 @@ src-tauri/target/
 # Code analysis output
 graphify-out/
 .codegraph/
+.zcode/
+
+# Python
+__pycache__/
+*.py[cod]
 
 # Editor directories and files
 .vscode/*
@@ -35,8 +40,6 @@ graphify-out/
 *.sw?
 release-assets/
 .qoderignore
-pnpm-workspace.yaml
 AGENTS.md
 skills/
 .agents/
-tools/

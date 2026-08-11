@@ -6,6 +6,16 @@ import { FlipHorizontal, FlipVertical, RotateCw, RotateCcw } from "lucide-react"
 import type Konva from "konva"
 import { createReducer } from "@/lib/state-utils"
 
+type TransformMode = "flip-h" | "flip-v" | "rot-cw" | "rot-ccw"
+
+// 静态工具栏按钮（模块作用域，避免每次渲染重建）
+const TOOLBAR_BUTTONS: { mode: TransformMode; label: string; icon: typeof FlipHorizontal }[] = [
+  { mode: "flip-h",  label: "水平翻转",   icon: FlipHorizontal },
+  { mode: "flip-v",  label: "垂直翻转",   icon: FlipVertical },
+  { mode: "rot-ccw", label: "逆时针 90°", icon: RotateCcw },
+  { mode: "rot-cw",  label: "顺时针 90°", icon: RotateCw },
+]
+
 export interface CropRect {
   x: number
   y: number
@@ -48,6 +58,29 @@ const CROP_ANCHORS: string[] = ["top-left", "top-center", "top-right", "middle-l
 const boundBoxFn = (oldBox: { x: number; y: number; width: number; height: number; rotation: number }, newBox: { x: number; y: number; width: number; height: number; rotation: number }) =>
   (newBox.width < MIN_CROP || newBox.height < MIN_CROP) ? oldBox : newBox
 
+// 变换状态（旋转/翻转，纯前端预览）
+export interface TransformState {
+  rotations: number  // 顺时针 90° 次数 (0-3)
+  flipH: boolean
+  flipV: boolean
+}
+
+export type TransformAction =
+  | { type: "rotateCW" }
+  | { type: "rotateCCW" }
+  | { type: "flipH" }
+  | { type: "flipV" }
+  | { type: "reset" }
+
+// oxlint-disable-next-line react-doctor/only-export-components
+export const transformReducer = createReducer<TransformState, TransformAction>({ // eslint-disable-line react-refresh/only-export-components
+  rotateCW: (state) => ({ ...state, rotations: (state.rotations + 1) % 4 }),
+  rotateCCW: (state) => ({ ...state, rotations: (state.rotations + 3) % 4 }),
+  flipH: (state) => ({ ...state, flipH: !state.flipH }),
+  flipV: (state) => ({ ...state, flipV: !state.flipV }),
+  reset: () => ({ rotations: 0, flipH: false, flipV: false }),
+})
+
 function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onApplyTransform }: CropCanvasProps) {
   const stageRef = useRef<Konva.Stage>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
@@ -86,25 +119,6 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onAppl
   const [ui, dispatchUI] = useReducer(uiReducer, { isDragOver: false, toolbarVisible: false })
 
   // 变换状态（旋转/翻转，纯前端预览）
-  interface TransformState {
-    rotations: number  // 顺时针 90° 次数 (0-3)
-    flipH: boolean
-    flipV: boolean
-  }
-  type TransformAction =
-    | { type: "rotateCW" }
-    | { type: "rotateCCW" }
-    | { type: "flipH" }
-    | { type: "flipV" }
-    | { type: "reset" }
-
-  const transformReducer = createReducer<TransformState, TransformAction>({
-    rotateCW: (state) => ({ ...state, rotations: (state.rotations + 1) % 4 }),
-    rotateCCW: (state) => ({ ...state, rotations: (state.rotations + 3) % 4 }),
-    flipH: (state) => ({ ...state, flipH: !state.flipH }),
-    flipV: (state) => ({ ...state, flipV: !state.flipV }),
-    reset: () => ({ rotations: 0, flipH: false, flipV: false }),
-  })
   const [transform, dispatchTransform] = useReducer(transformReducer, { rotations: 0, flipH: false, flipV: false })
 
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 })
@@ -449,13 +463,6 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onAppl
   } : null
   const overlayRects = stageCrop ? calculateOverlayRects(stageSize, stageCrop) : null
 
-  const toolbarButtons = [
-    { mode: "flip-h" as const, label: "水平翻转", icon: FlipHorizontal },
-    { mode: "flip-v" as const, label: "垂直翻转", icon: FlipVertical },
-    { mode: "rot-ccw" as const, label: "逆时针 90°", icon: RotateCcw },
-    { mode: "rot-cw" as const, label: "顺时针 90°", icon: RotateCw },
-  ]
-
   return (
     <div
       ref={containerRef}
@@ -472,7 +479,7 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onAppl
             ui.toolbarVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2 pointer-events-none"
           }`}
         >
-          {toolbarButtons.map(({ mode, label, icon: Icon }) => (
+          {TOOLBAR_BUTTONS.map(({ mode, label, icon: Icon }) => (
             <button
               key={mode}
               type="button"

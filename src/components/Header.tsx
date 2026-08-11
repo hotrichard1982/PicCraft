@@ -18,7 +18,7 @@ export function Header() {
 
       {/* Right: Version + Theme + Links */}
       <div className="flex items-center gap-4 text-sm text-muted-foreground">
-        <span className="text-xs">v0.1.0</span>
+        <span className="text-xs">v0.2.0</span>
 
         <Button
           variant="ghost"

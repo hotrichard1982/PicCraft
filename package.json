@@ -1,8 +1,12 @@
 {
   "name": "piccarft",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
+  "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": ">=24.14.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -10,7 +14,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:build": "node scripts/copy-dist.mjs",
-    "doctor": "npx react-doctor@latest",
+    "doctor": "react-doctor",
     "test": "vitest run"
   },
   "dependencies": {
@@ -50,7 +54,7 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
     "jsdom": "^29.1.0",
-    "react-doctor": "^0.5.4",
+    "react-doctor": "0.9.11",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12",

@@ -6,18 +6,16 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Slider } from "@/components/ui/slider"
-import { CropCanvas, type CropRect } from "@/components/CropCanvas"
+import { CropCanvas } from "@/components/CropCanvas"
 import { useAppStore } from "@/store"
-import { createReducer } from "@/lib/state-utils"
+import {
+  imageReducer,
+  editReducer,
+  aspectHeightForWidth,
+  aspectWidthForHeight,
+  type ImageInfo,
+} from "@/lib/single-tab-state"
 import { FolderOpen, RotateCcw, Save, Download, ListPlus } from "lucide-react"
-
-interface ImageInfo {
-  path: string
-  width: number
-  height: number
-  format: string
-  file_size: number
-}
 
 interface ImageResult {
   temp_path: string
@@ -31,66 +29,6 @@ interface SaveResult {
 }
 
 const IMG_EXTS = ["jpg", "jpeg", "png", "webp", "bmp"]
-
-// 图片文件相关状态
-export interface ImageState {
-  filePath: string
-  imageInfo: ImageInfo | null
-  displayPath: string | null
-  tempPath: string | null
-  cropRect: CropRect | null
-  hasImage: boolean
-  isPng: boolean
-}
-
-export type ImageAction =
-  | { type: "loadImage"; path: string; info: ImageInfo }
-  | { type: "setDisplayPath"; path: string }
-  | { type: "setTempPath"; path: string; width: number; height: number }
-  | { type: "setCropRect"; rect: CropRect | null }
-  | { type: "resetToOriginal" }
-
-export const imageReducer = createReducer<ImageState, ImageAction>({
-  loadImage: (_state, action) => ({
-    filePath: action.path,
-    imageInfo: action.info,
-    displayPath: action.path,
-    tempPath: null,
-    cropRect: null,
-    hasImage: true,
-    isPng: action.info.format.toLowerCase().includes("png"),
-  }),
-  setDisplayPath: (state, action) => ({ ...state, displayPath: action.path }),
-  setTempPath: (state, action) => ({ ...state, displayPath: action.path, tempPath: action.path, cropRect: null }),
-  setCropRect: (state, action) => ({ ...state, cropRect: action.rect }),
-  resetToOriginal: (state) =>
-    state.filePath
-      ? { ...state, displayPath: state.filePath, tempPath: null, cropRect: null }
-      : state,
-})
-
-// 编辑参数相关状态
-export interface EditState {
-  width: string
-  height: string
-  keepAspect: boolean
-  quality: string
-}
-
-export type EditAction =
-  | { type: "setWidth"; value: string }
-  | { type: "setHeight"; value: string }
-  | { type: "setKeepAspect"; value: boolean }
-  | { type: "setQuality"; value: string }
-  | { type: "setSize"; width: string; height: string }
-
-export const editReducer = createReducer<EditState, EditAction>({
-  setWidth: (state, action) => ({ ...state, width: action.value }),
-  setHeight: (state, action) => ({ ...state, height: action.value }),
-  setKeepAspect: (state, action) => ({ ...state, keepAspect: action.value }),
-  setQuality: (state, action) => ({ ...state, quality: action.value }),
-  setSize: (_state, action) => ({ ..._state, width: action.width, height: action.height }),
-})
 
 export function SingleTab() {
 
@@ -193,30 +131,24 @@ export function SingleTab() {
   const handleWidthChange = useCallback((value: string) => {
     dispatchEdit({ type: "setWidth", value })
     if (edit.keepAspect && img.imageInfo) {
-      const w = parseInt(value)
-      if (w > 0) {
-        dispatchEdit({ type: "setHeight", value: String(Math.round(w * img.imageInfo.height / img.imageInfo.width)) })
-      }
+      const h = aspectHeightForWidth(parseInt(value), img.imageInfo.width, img.imageInfo.height)
+      if (h !== null) dispatchEdit({ type: "setHeight", value: String(h) })
     }
   }, [edit.keepAspect, img.imageInfo])
 
   const handleHeightChange = useCallback((value: string) => {
     dispatchEdit({ type: "setHeight", value })
     if (edit.keepAspect && img.imageInfo) {
-      const h = parseInt(value)
-      if (h > 0) {
-        dispatchEdit({ type: "setWidth", value: String(Math.round(h * img.imageInfo.width / img.imageInfo.height)) })
-      }
+      const w = aspectWidthForHeight(parseInt(value), img.imageInfo.width, img.imageInfo.height)
+      if (w !== null) dispatchEdit({ type: "setWidth", value: String(w) })
     }
   }, [edit.keepAspect, img.imageInfo])
 
   const handleAspectToggle = useCallback((checked: boolean) => {
     dispatchEdit({ type: "setKeepAspect", value: checked })
     if (checked && img.imageInfo) {
-      const w = parseInt(edit.width)
-      if (w > 0) {
-        dispatchEdit({ type: "setHeight", value: String(Math.round(w * img.imageInfo.height / img.imageInfo.width)) })
-      }
+      const h = aspectHeightForWidth(parseInt(edit.width), img.imageInfo.width, img.imageInfo.height)
+      if (h !== null) dispatchEdit({ type: "setHeight", value: String(h) })
     }
   }, [img.imageInfo, edit.width])
 

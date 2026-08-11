@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { useAppStore } from "@/store"
 import type { DirEntry } from "@/views/BrowseView"
@@ -57,6 +57,23 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
   const loadingSetRef = useRef<Set<string>>(new Set())
   const currentMaxWidthRef = useRef<number>(thumbSize)
 
+  // 目录切换时重置缩略图 state：render 阶段条件重置（React 官方模式），
+  // 避免在 effect 中 setState（react-hooks/set-state-in-effect）
+  const [prevEntries, setPrevEntries] = useState(entries)
+  if (prevEntries !== entries) {
+    setPrevEntries(entries)
+    setThumbs({})
+  }
+
+  // 缓存上限保护：超限时 LRU 淘汰最旧的 sub-map
+  const evictOldestCache = () => {
+    const oldestKey = Math.min(...Array.from(thumbCacheRef.current.keys()))
+    const sub = thumbCacheRef.current.get(oldestKey)
+    const removed = sub ? Object.keys(sub).length : 0
+    thumbCacheRef.current.delete(oldestKey)
+    cacheSizeRef.current -= removed
+  }
+
   // ─── Layout 缓存：用于 rubberHit 避免反复 getBoundingClientRect ───
   const itemLayoutsRef = useRef<Map<string, { x: number; y: number; w: number; h: number }>>(new Map())
   const containerRectRef = useRef<{ left: number; top: number; scrollLeft: number; scrollTop: number } | null>(null)
@@ -67,6 +84,8 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
   // ─────────────────────────────────────────────────────────
   useEffect(() => {
     currentMaxWidthRef.current = thumbSize
+  })
+  useEffect(() => {
     observerRef.current = new IntersectionObserver(
       (items) => {
         for (const it of items) {
@@ -94,11 +113,7 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
                 cacheSizeRef.current++
                 // 缓存上限保护：超限时 LRU 淘汰最旧的 sub-map
                 if (cacheSizeRef.current > MAX_CACHE_SIZE) {
-                  const oldestKey = Math.min(...Array.from(thumbCacheRef.current.keys()))
-                  const sub = thumbCacheRef.current.get(oldestKey)
-                  const removed = sub ? Object.keys(sub).length : 0
-                  thumbCacheRef.current.delete(oldestKey)
-                  cacheSizeRef.current -= removed
+                  evictOldestCache()
                 }
                 setThumbs((prev) => ({ ...prev, [path]: url }))
               })
@@ -107,9 +122,9 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
                 sub[path] = "err"
                 thumbCacheRef.current.set(maxWidth, sub)
                 cacheSizeRef.current++
+                // 错误路径同样走 LRU 淘汰（与成功路径一致，避免全清导致视觉闪烁）
                 if (cacheSizeRef.current > MAX_CACHE_SIZE) {
-                  thumbCacheRef.current.clear()
-                  cacheSizeRef.current = 0
+                  evictOldestCache()
                 }
                 setThumbs((prev) => ({ ...prev, [path]: "err" }))
               })
@@ -135,9 +150,8 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
     }
   }, []) // ← 故意空依赖！observer 只创建一次
 
-  // 切换目录时清空所有缩略图缓存
+  // 切换目录时清空所有缩略图缓存（state 重置已在 render 阶段完成）
   useEffect(() => {
-    setThumbs({})
     thumbCacheRef.current.clear()
     cacheSizeRef.current = 0
     loadingSetRef.current.clear()
@@ -259,9 +273,9 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
     }
   }, [rubber])
 
-  // ─── 框选命中检测（用 layout 缓存）───
-  const rubberHit = useMemo(() => {
-    if (!rubber || rubber.w < 4 || rubber.h < 4) return new Set<string>()
+  // ─── 框选命中时同步到 store（用 layout 缓存；在 effect 内计算，避免 render 读 ref）───
+  useEffect(() => {
+    if (!rubber || rubber.w < 4 || rubber.h < 4) return
     const hit = new Set<string>()
     const rx1 = rubber.x
     const ry1 = rubber.y
@@ -276,14 +290,8 @@ export function ThumbnailGrid({ entries, thumbSize, onOpenFullscreen }: Thumbnai
       const overlapY = elY1 < ry2 && elY2 > ry1
       if (overlapX && overlapY) hit.add(path)
     }
-    return hit
-  }, [rubber])
-
-  // 框选命中时同步到 store（节流到 rubber 真实变化时）
-  useEffect(() => {
-    if (!rubber || rubber.w < 4 || rubber.h < 4) return
-    setSelected(rubberHit)
-  }, [rubberHit, rubber, setSelected])
+    setSelected(hit)
+  }, [rubber, setSelected])
 
   // ─── 热点 4 修复：useCallback 稳定 handler 引用 ───
 

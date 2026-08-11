@@ -107,13 +107,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   enqueue: (paths) => {
     const existing = new Set(get().queue.map((q) => q.path))
-    const newItems: QueueItem[] = paths
-      .filter((p) => !existing.has(p))
-      .map((p) => ({
-        path: p,
-        filename: p.split(/[/\\]/).pop() || p,
-        status: "pending",
-      }))
+    const newItems: QueueItem[] = []
+    for (const p of paths) {
+      if (existing.has(p)) continue
+      newItems.push({ path: p, filename: p.split(/[/\\]/).pop() || p, status: "pending" })
+    }
     if (newItems.length > 0) {
       set((s) => ({ queue: [...s.queue, ...newItems] }))
     }

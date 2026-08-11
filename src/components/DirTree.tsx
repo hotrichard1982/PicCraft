@@ -52,15 +52,15 @@ export function DirTree({ currentFolder, onSelectDirectory }: DirTreeProps) {
         next.delete(path)
       } else {
         next.add(path)
-        // 如果子节点未加载，触发加载
-        const existing = childrenMap.get(path)
-        if (existing === undefined || existing === null) {
-          // 延迟加载以避免在 state 更新循环中调用
-          setTimeout(() => loadChildren(path), 0)
-        }
       }
       return next
     })
+    // 如果子节点未加载，触发加载（副作用移到 updater 外，保持 updater 纯净）
+    const existing = childrenMap.get(path)
+    if (existing === undefined || existing === null) {
+      // 延迟加载以避免在 state 更新循环中调用
+      setTimeout(() => loadChildren(path), 0)
+    }
   }, [childrenMap, loadChildren])
 
   // 选择目录
@@ -96,12 +96,17 @@ export function DirTree({ currentFolder, onSelectDirectory }: DirTreeProps) {
 
     // 逐层展开 — 每个路径确保加载后展开
     let idx = 0
+    let cancelled = false
+    // 用普通 async 递归推进，避免自调度 setTimeout 链
+    // （react-doctor/effect-needs-cleanup 无法验证自调度 timer 的清理；
+    //  loadChildren 的 await 本身已给 React 留出渲染时机）
     const expandNext = async () => {
+      if (cancelled) return
       if (idx >= ancestorPaths.length) {
         setSelectedPath(currentFolder)
         // 滚动到选中节点
         requestAnimationFrame(() => {
-          if (!treeRef.current) return
+          if (cancelled || !treeRef.current) return
           const sel = treeRef.current.querySelector("[data-tree-selected]")
           sel?.scrollIntoView({ block: "nearest", behavior: "smooth" })
         })
@@ -113,14 +118,18 @@ export function DirTree({ currentFolder, onSelectDirectory }: DirTreeProps) {
       if (!childrenMap.has(p)) {
         setExpandedSet((prev) => new Set(prev).add(p))
         await loadChildren(p)
+        if (cancelled) return
       } else {
         setExpandedSet((prev) => new Set(prev).add(p))
       }
       idx++
-      // 延迟下一层展开，让 React 有时间渲染
-      setTimeout(expandNext, 50)
+      void expandNext()
     }
     expandNext()
+    return () => {
+      cancelled = true
+      autoLocatingRef.current = false
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentFolder])
 

@@ -30,6 +30,29 @@ function App() {
   // ─── 启动：hydrate 持久化 + 读启动参数 + 路由 ───
   useEffect(() => {
     let cancelled = false
+    // 4) 检查文件关联状态（延迟执行，不阻塞启动）
+    // setTimeout 在 effect 顶层创建，便于 effect 清理（react-doctor/effect-needs-cleanup）
+    const assocTimer = setTimeout(() => {
+      void (async () => {
+        if (cancelled) return
+        try {
+          const assoc = await invoke<{ open_ok: boolean; current_open_cmd: string | null; expected_open_cmd: string }>("check_file_assoc")
+          if (cancelled) return
+          if (!assoc.open_ok) {
+            const fix = await confirm(
+              `图片默认打开方式被修改了！\n\n当前：${assoc.current_open_cmd ?? "无"}\n期望：${assoc.expected_open_cmd}\n\n是否恢复为图轻剪？`,
+              { title: "文件关联", kind: "warning" },
+            )
+            if (fix) {
+              await invoke("register_file_assoc", { writeOpen: true, writeEdit: true })
+            }
+          }
+        } catch (e) {
+          console.warn("[App] file assoc check failed:", e)
+        }
+      })()
+    }, 1500)
+
     ;(async () => {
       // 1) 先 hydrate（拿到 lastFolder）
       await hydrate()
@@ -69,27 +92,10 @@ function App() {
       }
 
       setReady(true)
-
-      // 4) 检查文件关联状态（延迟执行，不阻塞启动）
-      setTimeout(async () => {
-        try {
-          const assoc = await invoke<{ open_ok: boolean; current_open_cmd: string | null; expected_open_cmd: string }>("check_file_assoc")
-          if (!assoc.open_ok) {
-            const fix = await confirm(
-              `图片默认打开方式被修改了！\n\n当前：${assoc.current_open_cmd ?? "无"}\n期望：${assoc.expected_open_cmd}\n\n是否恢复为图轻剪？`,
-              { title: "文件关联", kind: "warning" },
-            )
-            if (fix) {
-              await invoke("register_file_assoc", { writeOpen: true, writeEdit: true })
-            }
-          }
-        } catch (e) {
-          console.warn("[App] file assoc check failed:", e)
-        }
-      }, 1500)
     })()
     return () => {
       cancelled = true
+      clearTimeout(assocTimer)
     }
   }, [hydrate, setView, setCurrentFolder, setEditingFile, setBrowseTargetFile])
 

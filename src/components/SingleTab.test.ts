@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest"
 import {
   imageReducer,
   editReducer,
+  aspectHeightForWidth,
+  aspectWidthForHeight,
   type ImageState,
   type EditState,
-} from "@/components/SingleTab"
+} from "@/lib/single-tab-state"
 
 describe("imageReducer", () => {
   const initialState: ImageState = {
@@ -124,5 +126,43 @@ describe("editReducer", () => {
     const state = editReducer(initialState, { type: "setSize", width: "1920", height: "1080" })
     expect(state.width).toBe("1920")
     expect(state.height).toBe("1080")
+  })
+})
+
+describe("aspectHeightForWidth（等比换算：宽→高）", () => {
+  it("按原图比例计算高度", () => {
+    expect(aspectHeightForWidth(800, 1920, 1080)).toBe(450)
+  })
+
+  it("结果四舍五入", () => {
+    expect(aspectHeightForWidth(1000, 3000, 1999)).toBe(666)
+  })
+
+  it("宽度为 0 或负数时返回 null", () => {
+    expect(aspectHeightForWidth(0, 1920, 1080)).toBeNull()
+    expect(aspectHeightForWidth(-10, 1920, 1080)).toBeNull()
+  })
+
+  it("原图宽度为 0 时返回 null", () => {
+    expect(aspectHeightForWidth(800, 0, 1080)).toBeNull()
+  })
+})
+
+describe("aspectWidthForHeight（等比换算：高→宽）", () => {
+  it("按原图比例计算宽度", () => {
+    expect(aspectWidthForHeight(1080, 1920, 1080)).toBe(1920)
+  })
+
+  it("结果四舍五入", () => {
+    expect(aspectWidthForHeight(667, 3000, 1999)).toBe(1001)
+  })
+
+  it("高度为 0 或负数时返回 null", () => {
+    expect(aspectWidthForHeight(0, 1920, 1080)).toBeNull()
+    expect(aspectWidthForHeight(-10, 1920, 1080)).toBeNull()
+  })
+
+  it("原图高度为 0 时返回 null", () => {
+    expect(aspectWidthForHeight(1080, 1920, 0)).toBeNull()
   })
 })

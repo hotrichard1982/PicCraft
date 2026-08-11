@@ -295,6 +295,87 @@ pub fn save_image(
     })
 }
 
+/// 批量命令公共安全校验：输入（目录或文件列表）与输出路径均不得位于系统敏感目录。
+/// 输出目录 == 输入目录是合法场景（原地覆盖，见 ADR-0004），此处不禁止。
+fn validate_batch_paths(inputs: &[String], output: &str) -> Result<(), String> {
+    for p in inputs {
+        if is_sensitive_path(p) {
+            return Err("安全限制：不允许访问系统敏感目录".to_string());
+        }
+    }
+    if is_sensitive_path(output) {
+        return Err("安全限制：不允许访问系统敏感目录".to_string());
+    }
+    Ok(())
+}
+
+/// 扫描目录顶层图片文件：先按文件名排序（确定性），数量超过 MAX_DIR_ENTRIES 时截断并告警。
+/// 返回 (图片列表, 是否发生截断)。
+fn collect_dir_image_entries(dir: &Path) -> Result<(Vec<PathBuf>, bool), String> {
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map_err(|e| format!("读取目录失败: {e}"))?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| IMG_EXTS.contains(&ext.to_lowercase().as_str()))
+                .unwrap_or(false)
+        })
+        .map(|e| e.path())
+        .collect();
+    // read_dir 的返回顺序不保证，先排序再截断，保证超限时处理哪些文件是确定的
+    entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    let truncated = entries.len() > MAX_DIR_ENTRIES;
+    if truncated {
+        log::warn!(
+            "目录 {} 包含 {} 个图片，超出上限 {}，已截断",
+            dir.display(),
+            entries.len(),
+            MAX_DIR_ENTRIES
+        );
+        entries.truncate(MAX_DIR_ENTRIES);
+    }
+    Ok((entries, truncated))
+}
+
+/// 批量结果消息：发生截断时在末尾追加清晰警告（返回类型保持 String，前端兼容）
+fn batch_result_with_truncation_warning(result: String, truncated: bool) -> String {
+    if truncated {
+        format!("{result}（目录超过 {MAX_DIR_ENTRIES} 张上限，仅处理排序后前 {MAX_DIR_ENTRIES} 张，其余已跳过）")
+    } else {
+        result
+    }
+}
+
+/// 同批次重名时自动加后缀（_1、_2…），返回唯一文件名；不重名返回原文件名
+fn unique_batch_name(path: &Path, used_names: &mut std::collections::HashSet<String>) -> String {
+    let filename = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    if used_names.insert(filename.clone()) {
+        return filename;
+    }
+    let stem = path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let ext = path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    let mut idx = 1u32;
+    let mut candidate = format!("{}_{}{}", stem, idx, ext);
+    while !used_names.insert(candidate.clone()) {
+        idx += 1;
+        candidate = format!("{}_{}{}", stem, idx, ext);
+    }
+    candidate
+}
+
 /// 批量处理：按目标宽度等比缩放文件夹内所有图片
 #[tauri::command]
 pub async fn batch_process(
@@ -307,29 +388,25 @@ pub async fn batch_process(
     if target_width == 0 {
         return Err("目标宽度必须大于 0".to_string());
     }
+    // 输入/输出路径安全校验（与 batch_process_queue 一致；同目录输出按 ADR-0004 放行）
+    validate_batch_paths(std::slice::from_ref(&input_dir), &output_dir)?;
     let input_dir_clone = input_dir.clone();
     let output_dir_clone = output_dir.clone();
-    let entries: Vec<PathBuf> = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<PathBuf>, String> {
-        std::fs::create_dir_all(&output_dir_clone).map_err(|e| format!("创建输出目录失败: {e}"))?;
-        let entries: Vec<_> = std::fs::read_dir(&input_dir_clone)
-            .map_err(|e| format!("读取目录失败: {e}"))?
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path().extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(|ext| IMG_EXTS.contains(&ext.to_lowercase().as_str()))
-                    .unwrap_or(false)
-            })
-            .map(|e| e.path())
-            .collect();
-        Ok(entries)
-    }).await.map_err(|e| format!("任务执行失败: {e}"))??;
+    let (entries, truncated): (Vec<PathBuf>, bool) =
+        tauri::async_runtime::spawn_blocking(move || -> Result<(Vec<PathBuf>, bool), String> {
+            std::fs::create_dir_all(&output_dir_clone)
+                .map_err(|e| format!("创建输出目录失败: {e}"))?;
+            collect_dir_image_entries(Path::new(&input_dir_clone))
+        })
+        .await
+        .map_err(|e| format!("任务执行失败: {e}"))??;
 
     if entries.is_empty() {
         return Err("目录中没有图片文件".to_string());
     }
 
-    execute_batch_processing(app, entries, output_dir, target_width, quality).await
+    let result = execute_batch_processing(app, entries, output_dir, target_width, quality).await?;
+    Ok(batch_result_with_truncation_warning(result, truncated))
 }
 
 /// 批量处理队列版本：接收显式的图片路径列表（来自浏览视图的队列）
@@ -344,12 +421,8 @@ pub async fn batch_process_queue(
     if target_width == 0 { return Err("目标宽度必须大于 0".to_string()); }
     if paths.is_empty() { return Err("队列为空".to_string()); }
 
-    // 安全校验：拒绝敏感路径
-    for p in &paths {
-        if is_sensitive_path(p) {
-            return Err("安全限制：不允许访问系统敏感目录".to_string());
-        }
-    }
+    // 输入/输出路径安全校验（与 batch_process 一致；同目录输出按 ADR-0004 放行）
+    validate_batch_paths(&paths, &output_dir)?;
 
     let entries: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).filter(|p| p.is_file()).collect();
     if entries.is_empty() { return Err("队列中的文件全部失效".to_string()); }
@@ -375,20 +448,7 @@ async fn execute_batch_processing(
     for (i, path) in entries.iter().enumerate() {
         let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
         // 同名文件自动重命名，避免覆盖
-        let unique_name = if used_names.contains(&filename) {
-            let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
-            let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
-            let mut idx = 1u32;
-            let mut candidate = format!("{}_{}{}", stem, idx, ext);
-            while used_names.contains(&candidate) {
-                idx += 1;
-                candidate = format!("{}_{}{}", stem, idx, ext);
-            }
-            candidate
-        } else {
-            filename.clone()
-        };
-        used_names.insert(unique_name.clone());
+        let unique_name = unique_batch_name(path, &mut used_names);
         let out_path = PathBuf::from(&output_dir).join(&unique_name);
         let path_clone = path.clone();
         let out_path_clone = out_path.clone();
@@ -942,6 +1002,9 @@ mod tests {
 
     #[test]
     fn test_cleanup_temp_files() {
+        // 该测试会扫描并删除系统临时目录根部的所有 piccraft_ 前缀文件，
+        // 必须与依赖这些文件的测试串行执行（见 TEMP_FILE_TEST_LOCK 说明）
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
         // 创建一个 piccraft_ 前缀的临时文件
         let temp_dir = std::env::temp_dir();
         let test_file = temp_dir.join("piccraft_test_cleanup_dummy.tmp");
@@ -954,6 +1017,7 @@ mod tests {
 
     #[test]
     fn test_cleanup_temp_files_preserves_unrelated() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
         // 非 piccraft_ 前缀文件不应被删除
         let temp_dir = std::env::temp_dir();
         let unrelated = temp_dir.join("not_piccraft_test.tmp");
@@ -1050,5 +1114,584 @@ mod tests {
         // 不存在的文件应返回错误
         let result = check_file_size_path(Path::new("nonexistent_file_12345678.tmp"));
         assert!(result.is_err());
+    }
+
+    // ─── WORK-003-03 新增：测试隔离与覆盖 ───
+
+    /// 串行化"扫描/清理系统临时目录根部"的测试，避免并发互相删除临时文件
+    /// （cleanup_temp_files 会删除临时目录根下所有 piccraft_ 前缀文件，
+    /// 而 crop/resize 等测试依赖这些文件，必须互斥执行）
+    static TEMP_FILE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// 在系统临时目录创建独立测试子目录（测试隔离，不触碰用户真实目录）
+    fn test_work_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "piccraft_test_work003_{name}_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    /// 在测试子目录内创建纯色测试图片
+    fn make_test_image(dir: &Path, name: &str, width: u32, height: u32, ext: &str) -> PathBuf {
+        let path = dir.join(format!("{name}.{ext}"));
+        let img = image::RgbImage::from_pixel(width, height, image::Rgb([200, 100, 50]));
+        img.save(&path).expect("测试图片创建失败");
+        path
+    }
+
+    fn img_dims(path: &Path) -> (u32, u32) {
+        image::image_dimensions(path).expect("读取测试图片尺寸失败")
+    }
+
+    // ── 临时文件 ──
+
+    #[test]
+    fn test_temp_file_path_lives_in_temp_dir() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let path = temp_file_path(r"D:\Pictures\photo.jpg", "resized").unwrap();
+        assert_eq!(
+            path.parent().unwrap(),
+            std::env::temp_dir(),
+            "临时文件应位于系统临时目录"
+        );
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        assert!(
+            name.starts_with("piccraft_"),
+            "临时文件名应有 piccraft_ 前缀: {name}"
+        );
+        assert!(
+            name.ends_with("resized.jpg"),
+            "临时文件名应带后缀与源图扩展名: {name}"
+        );
+    }
+
+    #[test]
+    fn test_temp_file_path_unique_per_call() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let a = temp_file_path(r"D:\Pictures\photo.jpg", "resized").unwrap();
+        let b = temp_file_path(r"D:\Pictures\photo.jpg", "resized").unwrap();
+        assert_ne!(a, b, "两次调用应生成不同的临时文件");
+    }
+
+    #[test]
+    fn test_temp_file_path_extension_fallback() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        // 无扩展名 / 不支持扩展名 → 回退 png；jpeg 保持原格式
+        let no_ext = temp_file_path(r"D:\Pictures\photo", "t").unwrap();
+        assert!(no_ext.to_string_lossy().ends_with(".png"));
+        let unsupported = temp_file_path(r"D:\Pictures\photo.tiff", "t").unwrap();
+        assert!(unsupported.to_string_lossy().ends_with(".png"));
+        let jpeg = temp_file_path(r"D:\Pictures\photo.jpeg", "t").unwrap();
+        assert!(jpeg.to_string_lossy().ends_with(".jpeg"));
+    }
+
+    // ── 裁剪 crop ──
+
+    #[test]
+    fn test_crop_image_ok() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let dir = test_work_dir("crop_ok");
+        let src = make_test_image(&dir, "crop_src", 100, 80, "png");
+        let result = crop_image(src.to_string_lossy().to_string(), 10, 10, 20, 30).unwrap();
+        assert_eq!((result.width, result.height), (20, 30));
+        let temp = PathBuf::from(&result.temp_path);
+        assert!(temp.exists(), "裁剪结果临时文件应存在");
+        assert_eq!(img_dims(&temp), (20, 30));
+        let _ = std::fs::remove_file(&temp);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_crop_image_out_of_bounds() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let dir = test_work_dir("crop_oob");
+        let src = make_test_image(&dir, "crop_src", 100, 80, "png");
+        let err = crop_image(src.to_string_lossy().to_string(), 90, 70, 20, 20).unwrap_err();
+        assert!(err.contains("超出图片范围"), "越界裁剪应报错: {err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_crop_image_zero_size() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let dir = test_work_dir("crop_zero");
+        let src = make_test_image(&dir, "crop_src", 100, 80, "png");
+        assert!(crop_image(src.to_string_lossy().to_string(), 0, 0, 0, 10).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_crop_image_sensitive_path_rejected() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let err =
+            crop_image(r"C:\Windows\System32\fake.png".to_string(), 0, 0, 10, 10).unwrap_err();
+        assert!(err.contains("安全限制"), "敏感路径应被拒绝: {err}");
+    }
+
+    // ── 缩放 resize ──
+
+    #[test]
+    fn test_resize_image_ok() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let dir = test_work_dir("resize_ok");
+        let src = make_test_image(&dir, "resize_src", 100, 80, "png");
+        let result = resize_image(src.to_string_lossy().to_string(), 200, 160).unwrap();
+        assert_eq!((result.width, result.height), (200, 160));
+        let temp = PathBuf::from(&result.temp_path);
+        assert!(temp.exists(), "缩放结果临时文件应存在");
+        assert_eq!(img_dims(&temp), (200, 160));
+        let _ = std::fs::remove_file(&temp);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_resize_image_zero_target_rejected() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let dir = test_work_dir("resize_zero");
+        let src = make_test_image(&dir, "resize_src", 100, 80, "png");
+        assert!(resize_image(src.to_string_lossy().to_string(), 0, 100).is_err());
+        assert!(resize_image(src.to_string_lossy().to_string(), 100, 0).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_resize_image_sensitive_path_rejected() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let err = resize_image(r"C:\Windows\System32\fake.png".to_string(), 100, 100).unwrap_err();
+        assert!(err.contains("安全限制"), "敏感路径应被拒绝: {err}");
+    }
+
+    // ── 变换 transform ──
+
+    #[test]
+    fn test_transform_image_modes() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let dir = test_work_dir("transform_modes");
+        let src = make_test_image(&dir, "transform_src", 100, 80, "png");
+        let src_str = src.to_string_lossy().to_string();
+        for (mode, expect) in [
+            ("flip-h", (100, 80)),
+            ("flip-v", (100, 80)),
+            ("rot-cw", (80, 100)),
+            ("rot-ccw", (80, 100)),
+        ] {
+            let result = transform_image(src_str.clone(), mode.to_string()).unwrap();
+            assert_eq!((result.width, result.height), expect, "mode={mode}");
+            let temp = PathBuf::from(&result.temp_path);
+            assert!(temp.exists());
+            let _ = std::fs::remove_file(&temp);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_transform_image_unsupported_mode() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let dir = test_work_dir("transform_unsupported");
+        let src = make_test_image(&dir, "transform_src", 100, 80, "png");
+        let err = transform_image(src.to_string_lossy().to_string(), "rotate-45".to_string())
+            .unwrap_err();
+        assert!(err.contains("不支持的变换"), "未知模式应报错: {err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_transform_image_sensitive_path_rejected() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let err = transform_image(
+            r"C:\Windows\System32\fake.png".to_string(),
+            "flip-h".to_string(),
+        )
+        .unwrap_err();
+        assert!(err.contains("安全限制"), "敏感路径应被拒绝: {err}");
+    }
+
+    // ── 保存 save ──
+
+    #[test]
+    fn test_save_image_jpeg_ok_and_temp_cleanup() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let dir = test_work_dir("save_jpeg");
+        let src = make_test_image(&dir, "save_src", 40, 30, "png");
+        let src_str = src.to_string_lossy().to_string();
+        let out = dir.join("out.jpg");
+        let result = save_image(
+            src_str.clone(),
+            out.to_string_lossy().to_string(),
+            "jpeg".to_string(),
+            80,
+        )
+        .unwrap();
+        assert!(out.exists(), "JPEG 输出文件应存在");
+        assert!(result.file_size > 0);
+        assert!(!Path::new(&src_str).exists(), "保存成功后临时文件应被清理");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_save_image_png_webp_bmp_ok() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let dir = test_work_dir("save_multi");
+        for fmt in ["png", "webp", "bmp"] {
+            let src = make_test_image(&dir, &format!("save_src_{fmt}"), 40, 30, "png");
+            let out = dir.join(format!("out_{fmt}.{fmt}"));
+            let result = save_image(
+                src.to_string_lossy().to_string(),
+                out.to_string_lossy().to_string(),
+                fmt.to_string(),
+                80,
+            )
+            .unwrap();
+            assert!(out.exists(), "{fmt} 输出文件应存在");
+            assert!(result.file_size > 0);
+            assert!(!src.exists(), "保存成功后临时文件应被清理");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_save_image_png_quality_clamp() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let dir = test_work_dir("save_clamp");
+        // quality 0/101 应被 clamp 而非报错
+        let src = make_test_image(&dir, "save_src", 40, 30, "png");
+        let out = dir.join("out_q0.png");
+        let r0 = save_image(
+            src.to_string_lossy().to_string(),
+            out.to_string_lossy().to_string(),
+            "png".to_string(),
+            0,
+        )
+        .unwrap();
+        assert!(r0.file_size > 0);
+        let src2 = make_test_image(&dir, "save_src2", 40, 30, "png");
+        let out2 = dir.join("out_q101.png");
+        let r101 = save_image(
+            src2.to_string_lossy().to_string(),
+            out2.to_string_lossy().to_string(),
+            "png".to_string(),
+            101,
+        )
+        .unwrap();
+        assert!(r101.file_size > 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_save_image_unsupported_format() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let dir = test_work_dir("save_badfmt");
+        let src = make_test_image(&dir, "save_src", 40, 30, "png");
+        let out = dir.join("out.gif");
+        let err = save_image(
+            src.to_string_lossy().to_string(),
+            out.to_string_lossy().to_string(),
+            "gif".to_string(),
+            80,
+        )
+        .unwrap_err();
+        assert!(err.contains("不支持的格式"), "未知格式应报错: {err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_save_image_sensitive_paths_rejected() {
+        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let dir = test_work_dir("save_sensitive");
+        let src = make_test_image(&dir, "save_src", 40, 30, "png");
+        let win = r"C:\Windows\System32\fake.png";
+        // 临时路径敏感
+        assert!(save_image(
+            win.to_string(),
+            src.to_string_lossy().to_string(),
+            "png".to_string(),
+            80
+        )
+        .is_err());
+        // 保存路径敏感
+        assert!(save_image(
+            src.to_string_lossy().to_string(),
+            win.to_string(),
+            "png".to_string(),
+            80
+        )
+        .is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── 缩略图 thumbnail ──
+
+    #[test]
+    fn test_make_thumbnail_scales_down() {
+        let dir = test_work_dir("thumb_scale");
+        let src = make_test_image(&dir, "thumb_src", 200, 100, "png");
+        let thumb = make_thumbnail(src.to_string_lossy().to_string(), 50).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&thumb)
+            .expect("应返回 base64");
+        assert_eq!(
+            &bytes[..8],
+            &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A],
+            "应返回 PNG"
+        );
+        let img = image::load_from_memory(&bytes).unwrap();
+        assert!(
+            img.width() <= 50 && img.height() <= 25,
+            "缩略图应不超过 max_width: {}x{}",
+            img.width(),
+            img.height()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_make_thumbnail_jpeg_fast_path() {
+        let dir = test_work_dir("thumb_jpeg");
+        let src = make_test_image(&dir, "thumb_jpeg_src", 200, 100, "jpg");
+        let thumb = make_thumbnail(src.to_string_lossy().to_string(), 50).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&thumb)
+            .unwrap();
+        let img = image::load_from_memory(&bytes).unwrap();
+        assert!(
+            img.width() <= 50 && img.height() <= 25,
+            "JPEG 快速路径缩略图应不超过 max_width: {}x{}",
+            img.width(),
+            img.height()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_make_thumbnail_max_width_clamped() {
+        let dir = test_work_dir("thumb_clamp");
+        let src = make_test_image(&dir, "thumb_clamp_src", 2000, 1000, "png");
+        let thumb = make_thumbnail(src.to_string_lossy().to_string(), 5000).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&thumb)
+            .unwrap();
+        let img = image::load_from_memory(&bytes).unwrap();
+        assert!(
+            img.width() <= THUMBNAIL_MAX_WIDTH && img.height() <= THUMBNAIL_MAX_WIDTH,
+            "max_width 应被截断到 THUMBNAIL_MAX_WIDTH: {}x{}",
+            img.width(),
+            img.height()
+        );
+        assert!(img.width() < 2000, "大图应被缩小: {}", img.width());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_make_thumbnail_zero_width_rejected() {
+        let dir = test_work_dir("thumb_zero");
+        let src = make_test_image(&dir, "thumb_src", 200, 100, "png");
+        assert!(make_thumbnail(src.to_string_lossy().to_string(), 0).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_make_thumbnail_sensitive_path_rejected() {
+        let err = make_thumbnail(r"C:\Windows\System32\fake.png".to_string(), 100).unwrap_err();
+        assert!(err.contains("安全限制"), "敏感路径应被拒绝: {err}");
+    }
+
+    // ── 批量命名（WORK-003-04 前端确认的后端行为依据）──
+
+    #[test]
+    fn test_unique_batch_name_duplicates_suffixed() {
+        let mut used = std::collections::HashSet::new();
+        let p = Path::new(r"D:\photos\a.png");
+        assert_eq!(unique_batch_name(p, &mut used), "a.png");
+        assert_eq!(unique_batch_name(p, &mut used), "a_1.png");
+        assert_eq!(unique_batch_name(p, &mut used), "a_2.png");
+    }
+
+    #[test]
+    fn test_unique_batch_name_distinct_filenames_kept() {
+        let mut used = std::collections::HashSet::new();
+        assert_eq!(
+            unique_batch_name(Path::new(r"D:\photos\a.png"), &mut used),
+            "a.png"
+        );
+        assert_eq!(
+            unique_batch_name(Path::new(r"D:\photos\b.jpg"), &mut used),
+            "b.jpg"
+        );
+        // 同 stem 不同扩展名视为不同文件名
+        assert_eq!(
+            unique_batch_name(Path::new(r"D:\photos\a.jpg"), &mut used),
+            "a.jpg"
+        );
+    }
+
+    #[test]
+    fn test_process_single_batch_same_dir_overwrites() {
+        // ADR-0004 后端行为依据：输出 == 输入且不重名 → 直接覆盖原图（原地替换工作流，允许）
+        let dir = test_work_dir("batch_overwrite");
+        let img = make_test_image(&dir, "src", 100, 80, "png");
+        let result = process_single_batch(&img, &img, 50, 60);
+        assert!(result.is_ok(), "同目录覆盖应成功: {:?}", result);
+        assert!(img.exists(), "覆盖后文件应存在");
+        assert_eq!(img_dims(&img), (50, 40), "原图应按目标宽度等比缩小并覆盖");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_process_single_batch_suffixed_output_keeps_both() {
+        let dir = test_work_dir("batch_suffix");
+        let img = make_test_image(&dir, "src", 100, 80, "png");
+        let out = dir.join("src_1.png");
+        let result = process_single_batch(&img, &out, 50, 60);
+        assert!(result.is_ok());
+        assert!(
+            img.exists() && out.exists(),
+            "重名后缀输出时原图与输出应同时存在"
+        );
+        assert_eq!(img_dims(&out), (50, 40));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_process_single_batch_jpeg_output() {
+        let dir = test_work_dir("batch_jpeg");
+        let img = make_test_image(&dir, "src", 100, 80, "png");
+        let out = dir.join("out.jpg");
+        let result = process_single_batch(&img, &out, 50, 60);
+        assert!(result.is_ok());
+        let bytes = std::fs::read(&out).unwrap();
+        assert_eq!(&bytes[..2], &[0xFF, 0xD8], "png 输入 + jpg 输出应生成 JPEG");
+        assert_eq!(img_dims(&out), (50, 40));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_process_single_batch_zero_width_rejected() {
+        let dir = test_work_dir("batch_zero");
+        let img = make_test_image(&dir, "src", 100, 80, "png");
+        assert!(process_single_batch(&img, &img, 0, 60).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── 批量命令公共校验（batch_process 与 batch_process_queue 共用）──
+
+    #[test]
+    fn test_validate_batch_paths_rejects_sensitive_input() {
+        let err = validate_batch_paths(&[r"C:\Windows\System32".to_string()], r"D:\Pictures\batch")
+            .unwrap_err();
+        assert!(err.contains("安全限制"), "敏感输入目录应被拒绝: {err}");
+    }
+
+    #[test]
+    fn test_validate_batch_paths_rejects_sensitive_output() {
+        let err =
+            validate_batch_paths(&[r"D:\Pictures\batch".to_string()], r"C:\Program Files\out")
+                .unwrap_err();
+        assert!(err.contains("安全限制"), "敏感输出目录应被拒绝: {err}");
+    }
+
+    #[test]
+    fn test_validate_batch_paths_rejects_appdata_input() {
+        let err = validate_batch_paths(
+            &[r"C:\Users\alice\AppData\Roaming\pics".to_string()],
+            r"D:\Pictures\batch",
+        )
+        .unwrap_err();
+        assert!(err.contains("安全限制"), "AppData 输入应被拒绝: {err}");
+    }
+
+    #[test]
+    fn test_validate_batch_paths_same_dir_allowed() {
+        // ADR-0004：输出 == 输入是合法场景（前端二次确认），后端校验必须放行
+        let same = r"D:\Pictures\batch";
+        assert!(validate_batch_paths(&[same.to_string()], same).is_ok());
+    }
+
+    #[test]
+    fn test_validate_batch_paths_safe_paths_ok() {
+        assert!(validate_batch_paths(
+            &[r"D:\Pictures\batch".to_string()],
+            r"D:\Pictures\batch_out"
+        )
+        .is_ok());
+    }
+
+    // ── 目录扫描上限 MAX_DIR_ENTRIES ──
+
+    #[test]
+    fn test_collect_dir_image_entries_under_limit() {
+        let dir = test_work_dir("scan_small");
+        for n in ["a.png", "b.JPG", "c.webp"] {
+            std::fs::File::create(dir.join(n)).unwrap();
+        }
+        std::fs::File::create(dir.join("note.txt")).unwrap();
+        std::fs::create_dir(dir.join("sub")).unwrap();
+        let (entries, truncated) = collect_dir_image_entries(&dir).unwrap();
+        assert_eq!(entries.len(), 3, "应识别大小写扩展名，跳过非图片文件");
+        assert!(!truncated, "未超上限不应标记截断");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_collect_dir_image_entries_truncates_over_max() {
+        let dir = test_work_dir("scan_max");
+        for i in 0..(MAX_DIR_ENTRIES + 3) {
+            std::fs::File::create(dir.join(format!("img_{i:05}.png"))).unwrap();
+        }
+        let (entries, truncated) = collect_dir_image_entries(&dir).unwrap();
+        assert!(truncated, "超出上限应标记截断");
+        assert_eq!(
+            entries.len(),
+            MAX_DIR_ENTRIES,
+            "超出上限应截断到 MAX_DIR_ENTRIES"
+        );
+        // 确定性：截断保留的是文件名排序后的前 MAX_DIR_ENTRIES 个，且整体升序
+        assert_eq!(
+            entries.first().unwrap().file_name().unwrap().to_string_lossy(),
+            "img_00000.png",
+            "应保留文件名最小的条目"
+        );
+        assert_eq!(
+            entries.last().unwrap().file_name().unwrap().to_string_lossy(),
+            format!("img_{:05}.png", MAX_DIR_ENTRIES - 1),
+            "应截掉文件名最大（最后创建）的 3 个"
+        );
+        assert!(
+            entries.windows(2).all(|w| w[0].file_name() <= w[1].file_name()),
+            "截断结果应按文件名升序"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_collect_dir_image_entries_empty_dir() {
+        let dir = test_work_dir("scan_empty");
+        let (entries, truncated) = collect_dir_image_entries(&dir).unwrap();
+        assert!(entries.is_empty(), "空目录返回空列表");
+        assert!(!truncated, "空目录不应标记截断");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_batch_result_with_truncation_warning() {
+        // batch_process 命令本身需要 AppHandle，无法直接构造；警告拼接在共享纯函数上覆盖
+        let plain = batch_result_with_truncation_warning("完成！共处理 5 张图片".to_string(), false);
+        assert_eq!(plain, "完成！共处理 5 张图片", "未截断时消息原样返回");
+
+        let warned =
+            batch_result_with_truncation_warning("完成！共处理 5000 张图片".to_string(), true);
+        assert!(
+            warned.contains("完成！共处理 5000 张图片"),
+            "截断时保留原结果消息"
+        );
+        assert!(
+            warned.contains(&format!("超过 {MAX_DIR_ENTRIES} 张上限")),
+            "截断时追加清晰警告: {warned}"
+        );
+        assert!(
+            warned.contains("已跳过"),
+            "警告应明确其余图片被跳过: {warned}"
+        );
     }
 }

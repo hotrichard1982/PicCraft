@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useReducer, useRef } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import { open } from "@tauri-apps/plugin-dialog"
+import { open, confirm } from "@tauri-apps/plugin-dialog"
 import { load as loadStore } from "@tauri-apps/plugin-store"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,6 +11,7 @@ import { FolderOpen, Play } from "lucide-react"
 import { QueuePanel } from "@/components/QueuePanel"
 import { useAppStore } from "@/store"
 import { createReducer } from "@/lib/state-utils"
+import { needsOverwriteConfirm } from "@/lib/batch-dir"
 
 interface BatchProgress {
   current: number
@@ -22,20 +23,31 @@ interface BatchProgress {
 }
 
 // 批处理运行时状态
-interface BatchRunState {
+export interface BatchRunState {
   processing: boolean
   progress: BatchProgress
   errors: string[]
   listenFailed: boolean
 }
 
-type BatchRunAction =
+export type BatchRunAction =
   | { type: "start" }
   | { type: "setProgress"; progress: BatchProgress; error?: string }
   | { type: "listenFailed" }
   | { type: "finish" }
 
-const batchRunReducer = createReducer<BatchRunState, BatchRunAction>({
+// 确认对话框文案（ADR-0004：必须明确"不可恢复"与处理规则）
+const OVERWRITE_CONFIRM_MESSAGE =
+  "输出目录与原图所在目录相同，原图将被覆盖，此操作不可恢复。处理前不会备份，覆盖前不再提示。"
+const OVERWRITE_CONFIRM_OPTIONS = {
+  title: "确认覆盖原图",
+  kind: "warning",
+  okLabel: "确认覆盖",
+  cancelLabel: "取消",
+} as const
+
+// oxlint-disable-next-line react-doctor/only-export-components
+export const batchRunReducer = createReducer<BatchRunState, BatchRunAction>({ // eslint-disable-line react-refresh/only-export-components
   start: (state) => ({
     ...state, processing: true, errors: [], listenFailed: false,
     progress: { current: 0, total: 0, filename: "", path: "", error: null },
@@ -108,6 +120,11 @@ export function BatchTab() {
       setStatusText("请先选择输出文件夹")
       return
     }
+    // ADR-0004：输出目录与任一原图所在目录相同 → 二次确认，取消则不执行
+    if (needsOverwriteConfirm(queue.map((q) => q.path), outputDir)) {
+      const confirmed = await confirm(OVERWRITE_CONFIRM_MESSAGE, OVERWRITE_CONFIRM_OPTIONS)
+      if (!confirmed) return
+    }
     dispatchRun({ type: "start" })
     setStatusText("正在处理...")
 
@@ -173,7 +190,7 @@ export function BatchTab() {
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">输出目录</Label>
             <div className="flex items-center gap-2">
               <Input value={outputDir} readOnly placeholder="选择输出文件夹" className="text-xs flex-1" />
-              <Button variant="outline" size="sm" onClick={selectOutput} disabled={run.processing} className="shrink-0">
+              <Button variant="outline" size="sm" onClick={selectOutput} disabled={run.processing} className="shrink-0" aria-label="选择输出目录">
                 <FolderOpen className="size-3" />
               </Button>
             </div>

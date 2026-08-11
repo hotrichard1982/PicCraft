@@ -15,7 +15,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/store"
-import { formatSize } from "@/components/StatusBar"
+import { formatSize } from "@/lib/format-size"
 import type { DirEntry } from "@/views/BrowseView"
 import { createReducer } from "@/lib/state-utils"
 
@@ -31,40 +31,42 @@ const TOOLBAR_HIDE_DELAY = 1500
 const HINT_DURATION = 5000 // 首次提示停留时间
 
 // 图片加载相关状态
-interface ImageLoadState {
+export interface ImageLoadState {
   img: HTMLImageElement | null
   imgSize: { w: number; h: number }
   loading: boolean
   loadError: string | null
 }
 
-type ImageLoadAction =
+export type ImageLoadAction =
   | { type: "loadStart" }
   | { type: "loadSuccess"; img: HTMLImageElement; w: number; h: number }
   | { type: "loadError"; error: string }
 
-const imageLoadReducer = createReducer<ImageLoadState, ImageLoadAction>({
+// oxlint-disable-next-line react-doctor/only-export-components
+export const imageLoadReducer = createReducer<ImageLoadState, ImageLoadAction>({ // eslint-disable-line react-refresh/only-export-components
   loadStart: (state) => ({ ...state, img: null, loading: true, loadError: null }),
   loadSuccess: (_state, action) => ({ img: action.img, imgSize: { w: action.w, h: action.h }, loading: false, loadError: null }),
   loadError: (state, action) => ({ ...state, img: null, loading: false, loadError: action.error }),
 })
 
 // 画布视图相关状态（含旋转）
-interface ViewState {
+export interface ViewState {
   stageSize: { w: number; h: number }
   scale: number
   pos: { x: number; y: number }
   rotation: number // 0 | 90 | 180 | 270
 }
 
-type ViewAction =
+export type ViewAction =
   | { type: "resize"; w: number; h: number }
   | { type: "setScale"; scale: number }
   | { type: "setPos"; x: number; y: number }
   | { type: "setScaleAndPos"; scale: number; x: number; y: number; rotation?: number }
   | { type: "rotate" }
 
-const viewReducer = createReducer<ViewState, ViewAction>({
+// oxlint-disable-next-line react-doctor/only-export-components
+export const viewReducer = createReducer<ViewState, ViewAction>({ // eslint-disable-line react-refresh/only-export-components
   resize: (state, action) => ({ ...state, stageSize: { w: action.w, h: action.h } }),
   setScale: (state, action) => ({ ...state, scale: action.scale }),
   setPos: (state, action) => ({ ...state, pos: { x: action.x, y: action.y } }),
@@ -136,6 +138,7 @@ export function FullscreenViewer({
   const [meta, setMeta] = useState<{ size: number; format: string; width: number; height: number } | null>(null)
   useEffect(() => {
     if (!current) return
+    let cancelled = false
     const cached = metaCacheRef.current.get(current.path)
     if (cached) {
       setMeta(cached)
@@ -148,6 +151,7 @@ export function FullscreenViewer({
           "get_file_meta",
           { path: current.path },
         )
+        if (cancelled) return
         const info: { size: number; format: string; width: number; height: number } = {
           size: m.size,
           format: current.format,
@@ -160,6 +164,9 @@ export function FullscreenViewer({
         // ignore
       }
     })()
+    return () => {
+      cancelled = true
+    }
   }, [current])
 
   // ─── 适应窗口缩放（考虑旋转）───
@@ -208,18 +215,22 @@ export function FullscreenViewer({
   }, [])
 
   // ─── 工具条自动隐藏 ───
-  const showToolbar = useCallback(() => {
-    setToolbarVisible(true)
+  const scheduleHide = useCallback(() => {
     if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current)
     hideTimerRef.current = window.setTimeout(() => setToolbarVisible(false), TOOLBAR_HIDE_DELAY)
   }, [])
 
+  const showToolbar = useCallback(() => {
+    setToolbarVisible(true)
+    scheduleHide()
+  }, [scheduleHide])
+
   useEffect(() => {
-    showToolbar()
+    scheduleHide()
     return () => {
       if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current)
     }
-  }, [showToolbar])
+  }, [scheduleHide])
 
   // ─── 鼠标移动显示工具条 ───
   useEffect(() => {

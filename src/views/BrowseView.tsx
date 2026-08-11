@@ -34,6 +34,13 @@ export function BrowseView() {
   const [thumbSize, setThumbSize] = useState(THUMB_DEFAULT)
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null)
 
+  // 切换目录时关闭全屏看图：render 阶段条件重置（React 官方模式），避免 effect 中 setState
+  const [prevFolder, setPrevFolder] = useState(currentFolder)
+  if (prevFolder !== currentFolder) {
+    setPrevFolder(currentFolder)
+    setFullscreenIndex(null)
+  }
+
   // ─── 调 Rust read_dir 加载目录 ───
   const loadFolder = useCallback(async (folder: string) => {
     dispatch({ type: "loadStart" })
@@ -43,17 +50,15 @@ export function BrowseView() {
     } catch (e) {
       dispatch({ type: "loadError", error: String(e) })
     }
-  }, [])
+  }, [dispatch])
 
   useEffect(() => {
     if (currentFolder) {
       void loadFolder(currentFolder)
-      // 切换目录时关闭全屏看图
-      setFullscreenIndex(null)
     } else {
       dispatch({ type: "clear", initialData: [] })
     }
-  }, [currentFolder, loadFolder])
+  }, [currentFolder, loadFolder, dispatch])
 
   // ─── 双击／启动指定目标文件 → 自动进入全屏 ───
   useEffect(() => {
