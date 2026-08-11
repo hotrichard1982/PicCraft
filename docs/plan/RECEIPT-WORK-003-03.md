@@ -93,3 +93,34 @@ error: could not compile `piccarft` (lib test) due to 14 previous errors
 - **确定性截断**：`collect_dir_image_entries` 改为**先按文件名排序再截断**（`read_dir` 返回顺序不保证，原实现超限时处理集合不确定）；返回类型改为 `(Vec<PathBuf>, bool)`，截断标志上抛。
 - **返回结果清晰警告**：新增纯函数 `batch_result_with_truncation_warning`，`batch_process` 截断发生时在返回 `String` 末尾追加"（目录超过 5000 张上限，仅处理排序后前 5000 张，其余已跳过）"；未截断时消息原样返回，返回类型不变，前端兼容。
 - **测试**：更新 3 个目录扫描测试（解构 tuple、断言 truncated 标志、超限断言截断保留的是排序后最小文件名集合并整体升序）；新增 `test_batch_result_with_truncation_warning`（命令本身需 AppHandle 无法单测，警告拼接在共享纯函数 seam 覆盖，与既有说明一致）。`cargo test --locked`：**54 passed**（基线 53 → 补正后 54）。
+
+## 返工段（远端 CI 失败修复，2026-08-12）
+
+### 远端失败根因
+
+GitHub Actions runner 的 `std::env::temp_dir()` 位于 `C:\Users\runneradmin\AppData\Local\Temp`（**位于 AppData 之下**），而 `is_sensitive_path` 的 temp 豁免用 `path_ref.starts_with(temp_dir_ref)` 前缀匹配：`temp_dir()` 返回**带尾分隔符**（`...\Temp\`），但 `canonicalize` 对 temp 目录自身返回**无尾分隔符**的路径（`...\Temp`），前缀比较失败后继续命中 `\appdata\` 规则 → **temp 目录自身被误判为敏感**。首个 `test_crop_image_ok` 报"安全限制"，其持有 `TEMP_FILE_TEST_LOCK` 时 panic 使全局 Mutex poison，后续 20 个持锁测试连锁失败（`.lock().unwrap()` 全部 panic）。
+
+### 修复内容（`src-tauri/src/image_ops.rs`，生产代码 + 测试，委派范围内）
+
+1. **temp 豁免边界修正**（`is_sensitive_path`，行 559-571）：以去掉尾分隔符后的 `temp_dir_base` 做精确比较——`path_ref == temp_dir_base`（temp 目录自身）或 `path_ref.starts_with("{temp_dir_base}\\")`（temp 子路径）放行；`\appdata\` 规则不变，**其它 AppData 路径（含假路径 `C:\Users\someuser\AppData\Local\Temp`）仍拒绝**。
+2. **锁获取防 poison 连锁**（测试模块，20 处）：`TEMP_FILE_TEST_LOCK.lock().unwrap()` → `TEMP_FILE_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner())`，单个测试失败不再毒化其余 19 个持锁测试。
+3. **新增测试 2 个**（行 1096-1151）：
+   - `test_is_sensitive_path_temp_dir_itself_exempt`：真实 temp 目录自身（无尾分隔符/带尾分隔符两种形式）、temp 子目录、子路径文件全部放行；temp 不在 AppData 下时自动跳过，**不依赖本机真实用户名**（动态 `std::env::temp_dir()` 构造）。
+   - `test_is_sensitive_path_other_appdata_still_rejected`：回归护栏，其它 AppData 路径（含假用户名路径）仍判敏感，保证修复不放宽安全边界。
+
+### TDD 证据
+
+- **RED**：`cargo test --locked test_is_sensitive_path` → `test_is_sensitive_path_temp_dir_itself_exempt` 失败（`temp 目录自身应放行: C:\Users\76020\AppData\Local\Temp`），本地机器 temp 位于 AppData 下，完整复现远端 CI 场景；护栏测试同步通过。
+- **GREEN**：豁免修复后该测试通过；`cargo test --locked` 全量 **56 passed**（基线 54 → +2），连续 3 次多线程运行稳定（2.84s / 4.27s / 2.87s）。
+- `cargo check --locked`：通过。`cargo fmt --check`：57 处违规 = 基线 57 处（本次改动 0 新增，新增代码已按 rustfmt 格式书写）。`cargo clippy --all-targets -- -D warnings`：仍为基线 4 处（image_ops.rs:100/257/784/785），本次 0 新增。
+- 路径字面量检查：新增测试仅含假路径（`C:\Users\someuser\...`，canonicalize 失败走字符串判断）与动态 `std::env::temp_dir()`，无真实用户/系统路径硬编码。
+
+### 行号（当前 HEAD 工作区）
+
+- 豁免修复：`src-tauri/src/image_ops.rs:552`（函数）、`:559-571`（豁免块，`:562` 为 `temp_dir_base`）
+- 新测试：`:1101`（temp 目录自身豁免）、`:1134`（其它 AppData 不放行护栏）
+- 锁替换 20 处：`:1011` 起测试模块内全部 `TEMP_FILE_TEST_LOCK.lock()` 获取点（首处 `:1011-1013`）
+
+### 未决项
+
+- 未提交、未推送、未关闭 PLAN；仅改动 `src-tauri/src/image_ops.rs` 与本回执返工段，未触碰工作区其它既有变更。

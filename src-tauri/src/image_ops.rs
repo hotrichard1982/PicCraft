@@ -556,10 +556,13 @@ fn is_sensitive_path(path: &str) -> bool {
     // 去除 Windows UNC 前缀（\\?\）
     let path_ref = path_str.strip_prefix(r"\\?\").unwrap_or(&path_str);
 
-    // 系统临时目录豁免（应用自身的临时文件所在）
+    // 系统临时目录豁免（temp 目录自身及其子路径，容忍 canonicalize/temp_dir 尾分隔符差异）
     let temp_dir_str = std::env::temp_dir().to_string_lossy().to_lowercase();
     let temp_dir_ref = temp_dir_str.strip_prefix(r"\\?\").unwrap_or(&temp_dir_str);
-    if path_ref.starts_with(temp_dir_ref) {
+    let temp_dir_base = temp_dir_ref.strip_suffix('\\').unwrap_or(temp_dir_ref);
+    if !temp_dir_base.is_empty()
+        && (path_ref == temp_dir_base || path_ref.starts_with(&format!("{temp_dir_base}\\")))
+    {
         return false;
     }
 
@@ -1004,7 +1007,9 @@ mod tests {
     fn test_cleanup_temp_files() {
         // 该测试会扫描并删除系统临时目录根部的所有 piccraft_ 前缀文件，
         // 必须与依赖这些文件的测试串行执行（见 TEMP_FILE_TEST_LOCK 说明）
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         // 创建一个 piccraft_ 前缀的临时文件
         let temp_dir = std::env::temp_dir();
         let test_file = temp_dir.join("piccraft_test_cleanup_dummy.tmp");
@@ -1017,7 +1022,9 @@ mod tests {
 
     #[test]
     fn test_cleanup_temp_files_preserves_unrelated() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         // 非 piccraft_ 前缀文件不应被删除
         let temp_dir = std::env::temp_dir();
         let unrelated = temp_dir.join("not_piccraft_test.tmp");
@@ -1091,6 +1098,54 @@ mod tests {
     }
 
     #[test]
+    fn test_is_sensitive_path_temp_dir_itself_exempt() {
+        // 远端 CI 复现：temp 目录位于 AppData 下（如 C:\Users\runneradmin\AppData\Local\Temp），
+        // temp 目录自身（canonicalize 返回无尾分隔符）必须放行，不能命中 \appdata\ 规则
+        let temp_dir = std::env::temp_dir();
+        let temp_dir_str = temp_dir.to_string_lossy();
+        let bare = temp_dir_str.strip_suffix('\\').unwrap_or(&temp_dir_str);
+        if !bare.to_lowercase().contains(r"\appdata\") {
+            // 本机 temp 不在 AppData 下时该复现场景不存在，跳过（不依赖真实用户名）
+            return;
+        }
+        // temp 目录自身（无尾分隔符）
+        assert!(!is_sensitive_path(bare), "temp 目录自身应放行: {bare}");
+        // temp 目录自身（temp_dir() 返回的带尾分隔符形式）
+        assert!(
+            !is_sensitive_path(&temp_dir_str),
+            "temp 目录自身（带尾分隔符）应放行: {temp_dir_str}"
+        );
+        // temp 子目录与子路径（字符串形式，无尾分隔符）
+        let sub = temp_dir.join("piccraft_test_sensitive_subdir");
+        assert!(
+            !is_sensitive_path(&sub.to_string_lossy()),
+            "temp 子目录应放行: {}",
+            sub.display()
+        );
+        let sub_file = sub.join("x.png");
+        assert!(
+            !is_sensitive_path(&sub_file.to_string_lossy()),
+            "temp 子路径文件应放行: {}",
+            sub_file.display()
+        );
+    }
+
+    #[test]
+    fn test_is_sensitive_path_other_appdata_still_rejected() {
+        // 回归护栏：temp 豁免只放行真实 temp 目录本身及其子路径，不得放宽其它 AppData
+        assert!(is_sensitive_path(r"C:\Users\someuser\AppData\Local\Temp"));
+        assert!(is_sensitive_path(
+            r"C:\Users\someuser\AppData\Local\Temp\foo.png"
+        ));
+        assert!(is_sensitive_path(
+            r"C:\Users\someuser\AppData\Local\anything"
+        ));
+        assert!(is_sensitive_path(
+            r"C:\Users\someuser\AppData\Roaming\config"
+        ));
+    }
+
+    #[test]
     fn test_png_colors_bounds() {
         assert_eq!(png_colors(1), 16);      // 最低质量 → 16 色
         assert_eq!(png_colors(100), 256);   // 最高质量 → 256 色
@@ -1149,7 +1204,9 @@ mod tests {
 
     #[test]
     fn test_temp_file_path_lives_in_temp_dir() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let path = temp_file_path(r"D:\Pictures\photo.jpg", "resized").unwrap();
         assert_eq!(
             path.parent().unwrap(),
@@ -1169,7 +1226,9 @@ mod tests {
 
     #[test]
     fn test_temp_file_path_unique_per_call() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let a = temp_file_path(r"D:\Pictures\photo.jpg", "resized").unwrap();
         let b = temp_file_path(r"D:\Pictures\photo.jpg", "resized").unwrap();
         assert_ne!(a, b, "两次调用应生成不同的临时文件");
@@ -1177,7 +1236,9 @@ mod tests {
 
     #[test]
     fn test_temp_file_path_extension_fallback() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         // 无扩展名 / 不支持扩展名 → 回退 png；jpeg 保持原格式
         let no_ext = temp_file_path(r"D:\Pictures\photo", "t").unwrap();
         assert!(no_ext.to_string_lossy().ends_with(".png"));
@@ -1191,7 +1252,9 @@ mod tests {
 
     #[test]
     fn test_crop_image_ok() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let dir = test_work_dir("crop_ok");
         let src = make_test_image(&dir, "crop_src", 100, 80, "png");
         let result = crop_image(src.to_string_lossy().to_string(), 10, 10, 20, 30).unwrap();
@@ -1205,7 +1268,9 @@ mod tests {
 
     #[test]
     fn test_crop_image_out_of_bounds() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let dir = test_work_dir("crop_oob");
         let src = make_test_image(&dir, "crop_src", 100, 80, "png");
         let err = crop_image(src.to_string_lossy().to_string(), 90, 70, 20, 20).unwrap_err();
@@ -1215,7 +1280,9 @@ mod tests {
 
     #[test]
     fn test_crop_image_zero_size() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let dir = test_work_dir("crop_zero");
         let src = make_test_image(&dir, "crop_src", 100, 80, "png");
         assert!(crop_image(src.to_string_lossy().to_string(), 0, 0, 0, 10).is_err());
@@ -1224,7 +1291,9 @@ mod tests {
 
     #[test]
     fn test_crop_image_sensitive_path_rejected() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let err =
             crop_image(r"C:\Windows\System32\fake.png".to_string(), 0, 0, 10, 10).unwrap_err();
         assert!(err.contains("安全限制"), "敏感路径应被拒绝: {err}");
@@ -1234,7 +1303,9 @@ mod tests {
 
     #[test]
     fn test_resize_image_ok() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let dir = test_work_dir("resize_ok");
         let src = make_test_image(&dir, "resize_src", 100, 80, "png");
         let result = resize_image(src.to_string_lossy().to_string(), 200, 160).unwrap();
@@ -1248,7 +1319,9 @@ mod tests {
 
     #[test]
     fn test_resize_image_zero_target_rejected() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let dir = test_work_dir("resize_zero");
         let src = make_test_image(&dir, "resize_src", 100, 80, "png");
         assert!(resize_image(src.to_string_lossy().to_string(), 0, 100).is_err());
@@ -1258,7 +1331,9 @@ mod tests {
 
     #[test]
     fn test_resize_image_sensitive_path_rejected() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let err = resize_image(r"C:\Windows\System32\fake.png".to_string(), 100, 100).unwrap_err();
         assert!(err.contains("安全限制"), "敏感路径应被拒绝: {err}");
     }
@@ -1267,7 +1342,9 @@ mod tests {
 
     #[test]
     fn test_transform_image_modes() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let dir = test_work_dir("transform_modes");
         let src = make_test_image(&dir, "transform_src", 100, 80, "png");
         let src_str = src.to_string_lossy().to_string();
@@ -1288,7 +1365,9 @@ mod tests {
 
     #[test]
     fn test_transform_image_unsupported_mode() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let dir = test_work_dir("transform_unsupported");
         let src = make_test_image(&dir, "transform_src", 100, 80, "png");
         let err = transform_image(src.to_string_lossy().to_string(), "rotate-45".to_string())
@@ -1299,7 +1378,9 @@ mod tests {
 
     #[test]
     fn test_transform_image_sensitive_path_rejected() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let err = transform_image(
             r"C:\Windows\System32\fake.png".to_string(),
             "flip-h".to_string(),
@@ -1312,7 +1393,9 @@ mod tests {
 
     #[test]
     fn test_save_image_jpeg_ok_and_temp_cleanup() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let dir = test_work_dir("save_jpeg");
         let src = make_test_image(&dir, "save_src", 40, 30, "png");
         let src_str = src.to_string_lossy().to_string();
@@ -1332,7 +1415,9 @@ mod tests {
 
     #[test]
     fn test_save_image_png_webp_bmp_ok() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let dir = test_work_dir("save_multi");
         for fmt in ["png", "webp", "bmp"] {
             let src = make_test_image(&dir, &format!("save_src_{fmt}"), 40, 30, "png");
@@ -1353,7 +1438,9 @@ mod tests {
 
     #[test]
     fn test_save_image_png_quality_clamp() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let dir = test_work_dir("save_clamp");
         // quality 0/101 应被 clamp 而非报错
         let src = make_test_image(&dir, "save_src", 40, 30, "png");
@@ -1381,7 +1468,9 @@ mod tests {
 
     #[test]
     fn test_save_image_unsupported_format() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let dir = test_work_dir("save_badfmt");
         let src = make_test_image(&dir, "save_src", 40, 30, "png");
         let out = dir.join("out.gif");
@@ -1398,7 +1487,9 @@ mod tests {
 
     #[test]
     fn test_save_image_sensitive_paths_rejected() {
-        let _guard = TEMP_FILE_TEST_LOCK.lock().unwrap();
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let dir = test_work_dir("save_sensitive");
         let src = make_test_image(&dir, "save_src", 40, 30, "png");
         let win = r"C:\Windows\System32\fake.png";
