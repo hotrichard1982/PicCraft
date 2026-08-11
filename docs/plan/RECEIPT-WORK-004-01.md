@@ -165,3 +165,50 @@ error: could not compile `piccarft` (lib test) due to 44 previous errors
 - `docs/plan/RECEIPT-WORK-004-01.md`（本返工段）
 
 未提交、未推送、未关闭 PLAN。
+
+---
+
+## 返工段二（macOS URL 目录测试尾斜杠，2026-08-12）
+
+> 主代理验收缺陷：Run 31543334421（macOS arm64，Rust 测试步骤）`test_parse_opened_urls_directory` 失败——macOS `std::env::temp_dir()` 返回带尾斜杠（`/var/folders/.../T/`，源自 TMPDIR），expected 构造只 `trim_end_matches('\\')`（Windows 反斜杠）无法去掉 `/`；而 `parse_opened_urls` → `to_file_path()` 返回规范化路径（无尾分隔符）→ 断言 `folder` 不匹配。Windows 上 temp_dir() 返回带尾 `\` 且 trim 生效，故 Windows 通过、macOS 失败。未改任何生产逻辑。
+
+### 根因
+
+- macOS：`temp_dir()` = `/var/folders/<...>/T/`（尾 `/`）；`to_file_path` 往返后 `args.folder` = `/var/folders/<...>/T`（无尾分隔符）
+- `trim_end_matches('\\')` 只处理反斜杠 → expected 保留尾 `/` → `left: .../T` ≠ `right: .../T/`
+
+### 修复（单点小改动，仅测试模块）
+
+- `src-tauri/src/lib.rs`（`test_parse_opened_urls_directory`，expected 构造）：`trim_end_matches('\\')` → `trim_end_matches(|c| c == '\\' || c == '/')`，双分隔符统一去尾
+- `src-tauri/src/image_ops.rs`（`test_is_sensitive_path_temp_dir_itself_exempt`，同类隐患一并修复）：`strip_suffix('\\')` → `strip_suffix(|c| c == '\\' || c == '/')`
+
+### 同类排查清单（grep `trim_end_matches` / `strip_suffix('\\')` / `ends_with("\\\\")`）
+
+| 位置 | macOS 行为结论 | 处理 |
+|---|---|---|
+| `lib.rs:379` `trim_end_matches('\\')` | temp_dir() 尾 `/` 去不掉 → 断言失败（主缺陷，Run 31543334421） | **已修复**（双分隔符） |
+| `image_ops.rs:556/562` `is_under_temp_dir` 内 `strip_suffix('\\')` | 函数 cfg `any(not(target_os = "macos"), test)`：macOS 生产路径不引用（`is_sensitive_path` macOS 分支走 `is_sensitive_macos_path`）；仅测试调用且输入为 Windows 字面量（`r"c:\temp\"` 等），`strip_suffix('\\')` 对字面量行为两平台一致 → macOS 测试通过，无失败风险 | **不改**（属生产代码区，按任务边界；无实际隐患） |
+| `image_ops.rs:631` `is_sensitive_macos_path` 内 `strip_suffix('/')` | macOS 专用纯函数，路径分隔符即 `/`，strip 语义正确；既有测试已覆盖带尾斜杠形态（`"/var/folders/ab/cd/T/"`） | **不改**（行为正确） |
+| `image_ops.rs:1197` `test_is_sensitive_path_temp_dir_itself_exempt` 内 `strip_suffix('\\')` | macOS 上 strip 无效（尾分隔符为 `/`），bare 保留尾 `/`；macOS 路径不含 `\appdata\` → `contains` 恒 false → 提前 return 跳过（测试不失败，但 strip 语义失效属同类隐患） | **已修复**（双分隔符，macOS 行为不变仍跳过） |
+
+### 验证结果（本地 Windows）
+
+| 命令 | 结果 |
+|---|---|
+| `cargo test --manifest-path src-tauri/Cargo.toml --locked` | 通过，**72 passed / 0 failed**（与修改前数量一致） |
+| `cargo check --manifest-path src-tauri/Cargo.toml --locked` | 通过，`Finished dev profile`，0 warning |
+| `git diff --check` | 无输出（通过） |
+| `cargo fmt --check` | 仅报存量 `build.rs` 格式差异（本次未触碰该文件），本返工改动两文件无格式差异 |
+
+### 远端复验（Run ID 见下）
+
+- 触发：push 分支 `feat/macos-support` 后由 CI 新 Run 复验
+- Run：`gh run list --branch feat/macos-support` 最新 Run = <待填>
+- macOS arm64 Rust 测试结果：<待填>
+- 结论：<待填>
+
+### 本返工段改动文件
+
+- `src-tauri/src/lib.rs`（仅测试模块 1 处 expected 构造）
+- `src-tauri/src/image_ops.rs`（仅测试模块 1 处，生产代码 0 改动）
+- `docs/plan/RECEIPT-WORK-004-01.md`（本返工段）

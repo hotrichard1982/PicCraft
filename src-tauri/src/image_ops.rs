@@ -1194,7 +1194,9 @@ mod tests {
         // temp 目录自身（canonicalize 返回无尾分隔符）必须放行，不能命中 \appdata\ 规则
         let temp_dir = std::env::temp_dir();
         let temp_dir_str = temp_dir.to_string_lossy();
-        let bare = temp_dir_str.strip_suffix('\\').unwrap_or(&temp_dir_str);
+        let bare = temp_dir_str
+            .strip_suffix(|c| c == '\\' || c == '/')
+            .unwrap_or(&temp_dir_str);
         if !bare.to_lowercase().contains(r"\appdata\") {
             // 本机 temp 不在 AppData 下时该复现场景不存在，跳过（不依赖真实用户名）
             return;

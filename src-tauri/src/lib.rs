@@ -376,7 +376,10 @@ mod tests {
         let args = parse_opened_urls(std::slice::from_ref(&url));
         assert_eq!(args.mode, StartupMode::Browse);
         assert!(args.file.is_none());
-        let expected = dir.to_string_lossy().trim_end_matches('\\').to_string();
+        let expected = dir
+            .to_string_lossy()
+            .trim_end_matches(|c| c == '\\' || c == '/')
+            .to_string();
         assert_eq!(args.folder, Some(expected));
     }
 
