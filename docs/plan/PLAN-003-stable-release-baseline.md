@@ -1,11 +1,11 @@
 ---
 id: PLAN-003
 title: 稳定发布基线实施计划
-status: implementing
+status: completed
 source: PRD-001
 topics: [release, quality, ci, testing, docs]
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-12
 ---
 
 # PLAN-003 稳定发布基线实施计划
@@ -77,19 +77,22 @@ updated: 2026-08-11
 2. **WORK-003-02 react-doctor 精确锁定 `0.9.11` 授权**：工单流程默认"不升级依赖"，但 doctor 脚本原为 `npx react-doctor@latest`（基线不可复现、每次拉取最新版），主代理明确指示"doctor 脚本锁定"；实际方案为把 devDependencies 从未被使用的 `^0.5.4` 精确钉到基线实测版本 `0.9.11`（脚本实际使用版本从未变化，属锁定而非升级）。理由与证据见 `RECEIPT-WORK-003-02.md` 关键决策段。
 
 ## 测试与验证
-- [ ] 已运行要求的测试
+- [x] 已运行要求的测试
 - 测试命令：各 WORK 验证命令；总收口：`cd src-tauri && cargo test`、`pnpm lint`、`pnpm test`、`pnpm build`、`pnpm doctor`、`python tools/project_docs.py validate`、`python tools/project_docs.py index check`
 - 测试结果：
+  - 本地：`cargo test --locked` 58 passed；`pnpm test` 81 通过；`pnpm lint` 零错误；`pnpm build` 成功；`python tools/test_project_docs.py` 18 通过；`validate` 零断链；`index check` 健康
+  - 远端 CI（feat/plan-003-stable-baseline，Run 31539579969）：安装 / lint / 前端测试 / react-doctor / 构建 / Rust 工具链 / **Rust 测试 58 passed** / 文档链接校验 / 文档索引检查 **全部通过**；仅 Node 20 deprecated 提示（非门禁）
+  - CI 修复历程（4 次迭代，均为远端环境专属问题、本地无法预先暴露）：① temp 尾分隔符差异 → ② 8.3 短名（RUNNER~1）与 canonicalize 长名差异 → ③ 英文系统 cp1252 下中文输出 UnicodeEncodeError；对应修复与 TDD 证据见 `RECEIPT-WORK-003-03.md` 返工段一/二 与 `RECEIPT-WORK-003-06.md`
 
 ## 文档同步
-- [ ] 已更新来源 PRD 或 BUG
-- [ ] 已更新受影响项目文档
-- [ ] 已更新相关索引
+- [x] 已更新来源 PRD 或 BUG
+- [x] 已更新受影响项目文档
+- [x] 已更新相关索引
 
 ## 收口检查
-- [ ] 工单回执完整
-- [ ] 实施步骤全部完成
-- [ ] 测试通过并记录结果
-- [ ] 来源文档状态已更新
-- [ ] 受影响文档已更新
-- [ ] 索引已同步
+- [x] 工单回执完整
+- [x] 实施步骤全部完成
+- [x] 测试通过并记录结果
+- [x] 来源文档状态已更新
+- [x] 受影响文档已更新
+- [x] 索引已同步

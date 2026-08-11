@@ -10,10 +10,10 @@
 | WORK-001-05 | [文档同步](WORK-001-05-doc-sync.md) | PLAN-001 | ✅ 已完成 |
 | PLAN-002 | [单图裁剪遮罩不同步](PLAN-002-单图裁剪遮罩不同步.md) | BUG-001 | ✅ 已完成 |
 | WORK-002-01 | [裁剪遮罩坐标同步](WORK-002-01-crop-overlay-sync.md) | PLAN-002 / BUG-001 | ✅ 已验收 |
-| PLAN-003 | [稳定发布基线总计划](PLAN-003-stable-release-baseline.md) | PRD-001 | 🚧 实施中 |
-| WORK-003-01 | [环境依赖](WORK-003-01-env-dependencies.md) | PLAN-003 | 待开始 |
-| WORK-003-02 | [前端质量版本](WORK-003-02-frontend-quality-version.md) | PLAN-003 | 待开始 |
-| WORK-003-03 | [Rust 测试安全](WORK-003-03-rust-test-safety.md) | PLAN-003 | 待开始 |
-| WORK-003-04 | [批量确认前端测试](WORK-003-04-batch-confirm-frontend-tests.md) | PLAN-003 | 待开始 |
-| WORK-003-05 | [可复现构建 CI](WORK-003-05-reproducible-build-ci.md) | PLAN-003 | 待开始 |
-| WORK-003-06 | [文档工具治理](WORK-003-06-doc-tooling-governance.md) | PLAN-003 | 待开始 |
+| PLAN-003 | [稳定发布基线总计划](PLAN-003-stable-release-baseline.md) | PRD-001 | ✅ 已完成 |
+| WORK-003-01 | [环境依赖](WORK-003-01-env-dependencies.md) | PLAN-003 | ✅ 已验收 |
+| WORK-003-02 | [前端质量版本](WORK-003-02-frontend-quality-version.md) | PLAN-003 | ✅ 已验收 |
+| WORK-003-03 | [Rust 测试安全](WORK-003-03-rust-test-safety.md) | PLAN-003 | ✅ 已验收 |
+| WORK-003-04 | [批量确认前端测试](WORK-003-04-batch-confirm-frontend-tests.md) | PLAN-003 | ✅ 已验收 |
+| WORK-003-05 | [可复现构建 CI](WORK-003-05-reproducible-build-ci.md) | PLAN-003 | ✅ 已验收 |
+| WORK-003-06 | [文档工具治理](WORK-003-06-doc-tooling-governance.md) | PLAN-003 | ✅ 已验收 |

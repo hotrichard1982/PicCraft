@@ -3,7 +3,7 @@ id: RECEIPT-WORK-003-06
 work: WORK-003-06
 status: completed
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-12
 ---
 
 # RECEIPT-WORK-003-06
@@ -103,3 +103,26 @@ WORK-003-06 允许修改 `docs/**`（索引、链接修复）与 `tools/project_
 3. **`index compact` 归档链接重写**：归档行写入 `<kind>/archive/<year>.md` 后原相对文档链接失效，新增 `_rewrite_archive_row` 把相对链接加 `../` 前缀（外链与已相对链接不改）。
 4. **`cmd_new` 缺标题友好报错**：原实现 `slug(None)` 抛 `TypeError` 崩溃；改为提示"缺少标题：new {kind} 需要提供标题参数"并返回 1、不创建文档；同时补 `path.parent.mkdir`（plan 分支在 `docs/plan/` 不存在时写文件会 `FileNotFoundError`，测试暴露）。
 - 未提交、未推送、未 tag、未发布、未关闭 PLAN；PLAN/PRD/WORK 最终状态与 ACCEPTANCE 由主代理收口。
+
+## 返工段（CI 第三次失败修复：cp1252 中文输出崩溃，2026-08-12）
+
+### 远端失败根因
+
+GitHub Actions Windows runner 的 Python 3.12 stdout 默认编码为 **cp1252**（英文系统 ANSI 代码页），`project_docs.py` 的中文输出（如 `index check` 成功路径 `print('索引健康')`）在 cp1252 下抛 `UnicodeEncodeError: 'charmap' codec can't encode characters in position 0-3`。本地中文 Windows（cp936）能编码中文，从未暴露；CI 英文系统是首个无中文 locale 的运行点（Run 31538982613：Rust 已全绿，唯独「文档索引检查」失败）。
+
+### 修复内容（`tools/project_docs.py` + `tools/test_project_docs.py`，委派范围内）
+
+1. **新增 `_force_utf8_stdio()`**：遍历 `sys.stdout`/`sys.stderr`，对非 UTF-8 编码流 `reconfigure(encoding='utf-8', errors='replace')`，带 `getattr`/`encoding` 防御与异常吞掉；`main()` 顶部首行调用。不改变任何子命令行为、输出内容、退出码。
+2. **新增测试 1 个**：`TestCliEncoding.test_index_check_survives_cp1252_stdio` —— subprocess 运行真实脚本，env 注入 `PYTHONIOENCODING=cp1252`，断言 returncode==0、stderr 无 `Traceback`、stdout 含「索引健康」。
+
+### TDD 证据
+
+- **RED（本地复现）**：修复前 `PYTHONIOENCODING=cp1252 python tools/project_docs.py index check` → `UnicodeEncodeError`（与远端 CI 完全一致）；新增测试 FAILED。
+- **GREEN**：实现后同命令退出码 0 输出「索引健康」；`python tools/test_project_docs.py` **18 个全绿**（17 → +1）。
+- **cp1252 强制回归**：`index check` / `validate` / `status` / `context 发布` 在 `PYTHONIOENCODING=cp1252` 下全部退出码 0。
+- **远端验证**：Run 31539579969 全部步骤通过（含文档链接校验、文档索引检查）。
+
+### 未决项
+
+- 新测试断言 `index check` returncode==0；若未来 docs 索引超长触发「建议压缩」返回 2 会误报，当前仓库健康，属预期内。
+- 未提交、未推送、未关闭 PLAN；仅改动 `tools/project_docs.py` 与本回执返工段。
