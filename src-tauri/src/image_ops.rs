@@ -1162,6 +1162,9 @@ mod tests {
         }
     }
 
+    // 以下测试使用 Windows 路径语义（C:\ / D:\ / AppData），macOS 分支（is_sensitive_macos_path）
+    // 对这些形态的判定不同，仅 Windows 编译（WORK-004-01 返工：测试模块平台化）
+    #[cfg(windows)]
     #[test]
     fn test_is_sensitive_path_windows() {
         assert!(is_sensitive_path(r"C:\Windows\System32\cmd.exe"));
@@ -1170,6 +1173,7 @@ mod tests {
         assert!(is_sensitive_path(r"C:\Program Files (x86)\baz"));
     }
 
+    #[cfg(windows)]
     #[test]
     fn test_is_sensitive_path_safe_paths() {
         assert!(!is_sensitive_path(r"D:\Pictures\photo.jpg"));
@@ -1217,6 +1221,7 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
     #[test]
     fn test_is_sensitive_path_other_appdata_still_rejected() {
         // 回归护栏：temp 豁免只放行真实 temp 目录本身及其子路径，不得放宽其它 AppData
@@ -1418,6 +1423,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(windows)]
     #[test]
     fn test_crop_image_sensitive_path_rejected() {
         let _guard = TEMP_FILE_TEST_LOCK
@@ -1458,6 +1464,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(windows)]
     #[test]
     fn test_resize_image_sensitive_path_rejected() {
         let _guard = TEMP_FILE_TEST_LOCK
@@ -1505,6 +1512,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(windows)]
     #[test]
     fn test_transform_image_sensitive_path_rejected() {
         let _guard = TEMP_FILE_TEST_LOCK
@@ -1614,6 +1622,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(windows)]
     #[test]
     fn test_save_image_sensitive_paths_rejected() {
         let _guard = TEMP_FILE_TEST_LOCK
@@ -1711,6 +1720,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(windows)]
     #[test]
     fn test_make_thumbnail_sensitive_path_rejected() {
         let err = make_thumbnail(r"C:\Windows\System32\fake.png".to_string(), 100).unwrap_err();
@@ -1719,6 +1729,7 @@ mod tests {
 
     // ── 批量命名（WORK-003-04 前端确认的后端行为依据）──
 
+    #[cfg(windows)]
     #[test]
     fn test_unique_batch_name_duplicates_suffixed() {
         let mut used = std::collections::HashSet::new();
@@ -1728,6 +1739,7 @@ mod tests {
         assert_eq!(unique_batch_name(p, &mut used), "a_2.png");
     }
 
+    #[cfg(windows)]
     #[test]
     fn test_unique_batch_name_distinct_filenames_kept() {
         let mut used = std::collections::HashSet::new();
@@ -1796,6 +1808,7 @@ mod tests {
 
     // ── 批量命令公共校验（batch_process 与 batch_process_queue 共用）──
 
+    #[cfg(windows)]
     #[test]
     fn test_validate_batch_paths_rejects_sensitive_input() {
         let err = validate_batch_paths(&[r"C:\Windows\System32".to_string()], r"D:\Pictures\batch")
@@ -1803,6 +1816,7 @@ mod tests {
         assert!(err.contains("安全限制"), "敏感输入目录应被拒绝: {err}");
     }
 
+    #[cfg(windows)]
     #[test]
     fn test_validate_batch_paths_rejects_sensitive_output() {
         let err =
@@ -1811,6 +1825,7 @@ mod tests {
         assert!(err.contains("安全限制"), "敏感输出目录应被拒绝: {err}");
     }
 
+    #[cfg(windows)]
     #[test]
     fn test_validate_batch_paths_rejects_appdata_input() {
         let err = validate_batch_paths(
@@ -1821,6 +1836,7 @@ mod tests {
         assert!(err.contains("安全限制"), "AppData 输入应被拒绝: {err}");
     }
 
+    #[cfg(windows)]
     #[test]
     fn test_validate_batch_paths_same_dir_allowed() {
         // ADR-0004：输出 == 输入是合法场景（前端二次确认），后端校验必须放行
@@ -1828,6 +1844,7 @@ mod tests {
         assert!(validate_batch_paths(&[same.to_string()], same).is_ok());
     }
 
+    #[cfg(windows)]
     #[test]
     fn test_validate_batch_paths_safe_paths_ok() {
         assert!(validate_batch_paths(

@@ -287,75 +287,85 @@ mod tests {
         tauri::Url::parse(s).expect("测试 URL 应可解析")
     }
 
+    /// 构造平台合法的 file URL 及其 to_file_path 期望路径（WORK-004-01 返工）：
+    /// - Windows：`file:///C:/<rel>` → `C:\<rel>`（url crate 在 Windows 目标要求盘符，反斜杠分隔）
+    /// - Unix（含 macOS）：`file:///tmp/<rel>` → `/tmp/<rel>`
+    /// url crate 的 to_file_path 按编译目标解析，同一 URL 在不同平台产出不同路径，
+    /// 测试数据必须按平台合法构造，断言才有意义
+    fn file_url_pair(rel: &str) -> (tauri::Url, String) {
+        if cfg!(windows) {
+            (
+                test_url(&format!("file:///C:/{rel}")),
+                format!(r"C:\{}", rel.replace('/', "\\")),
+            )
+        } else {
+            (
+                test_url(&format!("file:///tmp/{rel}")),
+                format!("/tmp/{rel}"),
+            )
+        }
+    }
+
     #[test]
     fn test_urls_to_paths_single_file() {
-        let urls = vec![test_url("file:///C:/Photos/a.png")];
-        assert_eq!(
-            urls_to_paths(&urls),
-            vec![r"C:\Photos\a.png".to_string()]
-        );
+        let (url, expected) = file_url_pair("Photos/a.png");
+        assert_eq!(urls_to_paths(&[url]), vec![expected]);
     }
 
     #[test]
     fn test_urls_to_paths_multiple_keeps_order() {
-        let urls = vec![
-            test_url("file:///C:/Photos/a.png"),
-            test_url("file:///C:/Photos/b.png"),
-        ];
-        assert_eq!(
-            urls_to_paths(&urls),
-            vec![r"C:\Photos\a.png".to_string(), r"C:\Photos\b.png".to_string()]
-        );
+        let (url_a, expected_a) = file_url_pair("Photos/a.png");
+        let (url_b, expected_b) = file_url_pair("Photos/b.png");
+        assert_eq!(urls_to_paths(&[url_a, url_b]), vec![expected_a, expected_b]);
     }
 
     #[test]
     fn test_urls_to_paths_percent_encoded() {
-        let urls = vec![test_url("file:///C:/Photos/My%20Pics/a%20b.png")];
-        assert_eq!(
-            urls_to_paths(&urls),
-            vec![r"C:\Photos\My Pics\a b.png".to_string()]
-        );
+        // 百分号解码发生在 url crate 解析阶段，与平台无关；仅 URL 形态需平台合法
+        let (url, _) = file_url_pair("Photos/My%20Pics/a%20b.png");
+        let expected = if cfg!(windows) {
+            r"C:\Photos\My Pics\a b.png".to_string()
+        } else {
+            "/tmp/Photos/My Pics/a b.png".to_string()
+        };
+        assert_eq!(urls_to_paths(&[url]), vec![expected]);
     }
 
     #[test]
     fn test_urls_to_paths_filters_non_file_scheme() {
         // 非 file:// 的 URL（Finder 理论上只给 file://，防御性过滤）不产出路径
-        let urls = vec![
-            test_url("https://example.com/x.png"),
-            test_url("file:///C:/Photos/a.png"),
-        ];
-        assert_eq!(urls_to_paths(&urls), vec![r"C:\Photos\a.png".to_string()]);
+        let (file_url, expected) = file_url_pair("Photos/a.png");
+        let urls = vec![test_url("https://example.com/x.png"), file_url];
+        assert_eq!(urls_to_paths(&urls), vec![expected]);
     }
 
     #[test]
     fn test_parse_opened_urls_single_file_browse() {
         // 单文件 → Browse + file（与 argv 单图参数同一语义：前端定位该图）
-        let urls = vec![test_url("file:///C:/Photos/a.png")];
-        let args = parse_opened_urls(&urls);
+        let (url, expected) = file_url_pair("Photos/a.png");
+        let args = parse_opened_urls(&[url]);
         assert_eq!(args.mode, StartupMode::Browse);
-        assert_eq!(args.file, Some(r"C:\Photos\a.png".to_string()));
+        assert_eq!(args.file, Some(expected));
         assert!(args.folder.is_none());
     }
 
     #[test]
     fn test_parse_opened_urls_multiple_takes_first() {
         // 多文件 → 只按第一张图片所在目录浏览：只取第一个路径
-        let urls = vec![
-            test_url("file:///C:/Photos/a.png"),
-            test_url("file:///C:/Photos/b.png"),
-        ];
-        let args = parse_opened_urls(&urls);
+        let (url_a, expected_a) = file_url_pair("Photos/a.png");
+        let (url_b, _) = file_url_pair("Photos/b.png");
+        let args = parse_opened_urls(&[url_a, url_b]);
         assert_eq!(args.mode, StartupMode::Browse);
-        assert_eq!(args.file, Some(r"C:\Photos\a.png".to_string()));
+        assert_eq!(args.file, Some(expected_a));
     }
 
     #[test]
     fn test_parse_opened_urls_non_image_file() {
         // 非图片文件：与 argv 语义一致，不校验扩展名，仍走 Browse 定位
-        let urls = vec![test_url("file:///C:/Photos/notes.txt")];
-        let args = parse_opened_urls(&urls);
+        let (url, expected) = file_url_pair("Photos/notes.txt");
+        let args = parse_opened_urls(&[url]);
         assert_eq!(args.mode, StartupMode::Browse);
-        assert_eq!(args.file, Some(r"C:\Photos\notes.txt".to_string()));
+        assert_eq!(args.file, Some(expected));
     }
 
     #[test]

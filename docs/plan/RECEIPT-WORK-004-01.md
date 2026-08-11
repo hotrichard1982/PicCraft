@@ -99,3 +99,69 @@ error: could not compile `piccarft` (lib test) due to 44 previous errors
 - `is_sensitive_macos_path` 对 `canonicalize` 失败（路径不存在）的输入走原始字符串判定；canonicalize 成功时 `/var` 系符号链接展开为 `/private/var`，两种前缀均已覆盖，行为一致。
 - `/System/Volumes/...` 形态路径（若 canonicalize 将 firmlink 展开）会命中 `/system/` 前缀被拒绝——安全优先方向（误拒绝优于误放行），真实 macOS 上 `realpath` 不展开 firmlink，预期不影响用户图片目录。
 - 工作区既有未提交变更（WORK-004-03 并行：Cargo.toml/lock、tauri.conf.json、tauri.macos.conf.json、前端等）未触碰；本工单仅改动 `src-tauri/src/lib.rs`、`src-tauri/src/image_ops.rs` 与本回执。未提交、未推送、未关闭 PLAN。
+
+---
+
+## 返工段（测试模块平台化，2026-08-12）
+
+> 主代理验收缺陷：WORK-004-04（macOS CI 双架构）将真实编译并运行 `cargo test`，本工单原测试模块无平台保护，macOS 上必失败。本段为全部返工内容，未改任何生产逻辑。
+
+### 缺陷清单与处理
+
+**image_ops.rs — 新增 `#[cfg(windows)]`（15 处）**
+
+| # | 测试 | 处理理由 |
+|---|---|---|
+| 1 | `test_is_sensitive_path_windows` | `C:\Windows`、`C:\Users\...\AppData` 断言拒绝；macOS 分支（`is_sensitive_macos_path`）对这些形态不命中 → 断言失败 |
+| 2 | `test_is_sensitive_path_safe_paths` | `D:\` / `C:\Users\test\Pictures` 安全路径断言；macOS 分支对 `\` 形态恒放行，测试无断言价值且非 macOS 合法路径形态 |
+| 3 | `test_is_sensitive_path_other_appdata_still_rejected` | `C:\Users\someuser\AppData\...` 断言拒绝；macOS 分支不套 `\appdata\` 规则 → 失败 |
+| 4 | `test_crop_image_sensitive_path_rejected` | `C:\Windows\System32\fake.png` 在 macOS 不敏感 → 错误不含「安全限制」→ 失败 |
+| 5 | `test_resize_image_sensitive_path_rejected` | 同上 |
+| 6 | `test_transform_image_sensitive_path_rejected` | 同上 |
+| 7 | `test_save_image_sensitive_paths_rejected` | 同上 |
+| 8 | `test_make_thumbnail_sensitive_path_rejected` | 同上 |
+| 9 | `test_unique_batch_name_duplicates_suffixed` | `Path::file_name()` 在 Unix 上对 `D:\photos\a.png`（无 `/`）返回整串文件名 ≠ "a.png" → 失败 |
+| 10 | `test_unique_batch_name_distinct_filenames_kept` | 同上 |
+| 11 | `test_validate_batch_paths_rejects_sensitive_input` | `C:\Windows\System32` 在 macOS 不敏感 → 返回 Ok → `unwrap_err()` panic → 失败 |
+| 12 | `test_validate_batch_paths_rejects_sensitive_output` | 同上（`C:\Program Files\out`） |
+| 13 | `test_validate_batch_paths_rejects_appdata_input` | 同上（`C:\Users\alice\AppData\...`） |
+| 14 | `test_validate_batch_paths_same_dir_allowed` | `D:\Pictures\batch` 为 Windows 语义路径；macOS 恒通过但测不出「放行」语义，与 #11-13 同族统一 cfg |
+| 15 | `test_validate_batch_paths_safe_paths_ok` | 同上 |
+
+**image_ops.rs — 保留不加 cfg（已逐项核实 macOS 安全）**
+
+- `test_is_sensitive_path_temp_dir_exempt`：真实 `std::env::temp_dir()`；macOS 上 temp 位于 `/var/folders/...`（canonicalize 后 `/private/var/folders/...`），`is_sensitive_macos_path` temp 豁免两种前缀均放行 → 断言成立
+- `test_is_sensitive_path_temp_dir_itself_exempt`：macOS temp 路径不含 `\appdata\`，`bare.to_lowercase().contains(r"\appdata\")` 为 false → 提前 return 跳过，安全
+- `test_is_under_temp_dir_short_long_name_matrix` / `test_is_under_temp_dir_edge_cases_no_panic`：`is_under_temp_dir` 为纯字符串比较（`\` 分隔 + `starts_with`，无平台 API），Windows 形态字符串在 macOS 判定结果一致 → 通过；同时保持该函数（cfg `any(not(target_os = "macos"), test)`）在 macOS 测试构建被引用，避免 dead_code
+- `test_temp_file_path_lives_in_temp_dir` / `test_temp_file_path_unique_per_call` / `test_temp_file_path_extension_fallback`：macOS 上 `Path::new(r"D:\Pictures\photo.jpg")` 整串为单组件（`\` 非 Unix 分隔符），`file_stem`/`extension` 为字符串级解析，断言仅检查前缀/后缀/父目录/唯一性 → 通过
+
+**lib.rs — URL 测试平台化（7 个测试 + 1 个辅助函数）**
+
+- 方案选择：**运行时按平台构造测试数据**（`cfg!(windows)` 分支），放弃双份 `#[cfg(windows)]`/`#[cfg(not(windows))]` 测试。理由：7 个测试共 9 处 URL 字面量，双份方案会复制整个测试体（维护双倍）；`cfg!(windows)` 分支保持测试体单份、断言仍为平台合法字面量（非运行时推导拼装），与 `run()` 中既有 `cfg!(debug_assertions)` 风格一致。`to_file_path` 按编译目标解析，Windows 目标要求盘符（`file:///C:/...` → `C:\...`），Unix 目标无盘符（`file:///tmp/...` → `/tmp/...`）
+- 新增 `test` 模块辅助函数 `file_url_pair(rel) -> (tauri::Url, String)`：Windows 产 `file:///C:/<rel>` + `C:\<rel>`，Unix 产 `file:///tmp/<rel>` + `/tmp/<rel>`
+- 改造：`test_urls_to_paths_single_file` / `_multiple_keeps_order` / `_percent_encoded` / `_filters_non_file_scheme`、`test_parse_opened_urls_single_file_browse` / `_multiple_takes_first` / `_non_image_file`（百分号解码测试期望路径按平台字面量显式断言）
+- 保留不改：`test_parse_opened_urls_directory`（真实 temp_dir + `Url::from_file_path` 往返，平台对称构造）、`test_parse_opened_urls_empty_is_cold`（仅 https URL，平台无关）、`test_parse_edit` / `_from_iter_edit`（`--edit` 模式不解析 Path，字符串往返）、`test_parse_browse_file`（`is_dir()` 对不存在路径两边同为 false）
+
+**编译级排查（第 3 项）**
+
+- 两文件均无 `std::os::windows::*` / `OsStrExt` 等平台 API 无条件引用（grep 确认）
+- 生产代码平台 cfg（`list_subdirs` 驱动列表、`file_assoc` 注册表模块 `#[cfg(target_os = "windows")]`、`check_file_assoc` 双分支）与测试模块无交叉，macOS 走 `not(target_os = "windows")` 分支
+- macOS 测试构建下无 dead_code 风险：`is_sensitive_path`（macOS 分支被 crop/resize 等生产引用）、`validate_batch_paths`（batch_process 引用）、`unique_batch_name`（execute_batch_processing 引用）、`temp_file_path`（各生产函数引用）、`is_under_temp_dir`（保留的 2 个测试引用）、`urls_to_paths`/`parse_opened_urls`（`handle_finder_opened` 引用）、`handle_finder_opened`（`run()` 引用，依赖 `app.emit`/`get_webview_window`/`app.state` 均为 AppHandle 方法且 Emitter/Manager 已 use）
+
+### 验证结果
+
+| 命令 | 结果 |
+|---|---|
+| `cargo test --manifest-path src-tauri/Cargo.toml --locked` | 通过，**72 passed / 0 failed / 0 warning**（Windows 上数量与修改前一致：`cfg(windows)` 在 Windows 全真、lib.rs 改造不改测试数量；首次运行暴露 `file_url_pair` 期望缺 `C:\` 前缀，修正后全绿） |
+| `cargo check --manifest-path src-tauri/Cargo.toml --locked` | 通过，`Finished dev profile`，0 warning |
+| `git diff --check` | 无输出（通过） |
+
+**macOS 验证边界（诚实记录）**：本机 rustup 仅 `x86_64-pc-windows-msvc` 单一 target，无 macOS 交叉编译工具链，以下均为 cfg 推导 + 代码审查结论，未经真实编译：macOS 测试数 = 72 − 15（cfg(windows) 排除）+ 0 = **57**；`file:///tmp/...` → `/tmp/...` 解析、temp 目录豁免、`test_parse_opened_urls_directory` 的 from_file_path/to_file_path 往返尾分隔符行为均需 WORK-004-04 macOS CI 真实验证；若 CI 仍有编译或测试失败，再次返工。
+
+### 本返工段改动文件
+
+- `src-tauri/src/image_ops.rs`（仅测试模块 15 处 `#[cfg(windows)]` + 1 处分组注释，生产代码 0 改动）
+- `src-tauri/src/lib.rs`（仅测试模块：`file_url_pair` 辅助函数 + 7 个 URL 测试平台化，生产代码 0 改动）
+- `docs/plan/RECEIPT-WORK-004-01.md`（本返工段）
+
+未提交、未推送、未关闭 PLAN。
