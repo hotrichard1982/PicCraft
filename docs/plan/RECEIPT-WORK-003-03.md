@@ -124,3 +124,47 @@ GitHub Actions runner 的 `std::env::temp_dir()` 位于 `C:\Users\runneradmin\Ap
 ### 未决项
 
 - 未提交、未推送、未关闭 PLAN；仅改动 `src-tauri/src/image_ops.rs` 与本回执返工段，未触碰工作区其它既有变更。
+
+## 返工段二（8.3 短名差异修复，2026-08-12）
+
+### 远端失败根因
+
+上一轮修复（HEAD 85abbfc）只处理了 temp 豁免的**尾分隔符差异**，未处理 **canonicalize 展开差异**（Run 31538153532，43 passed / 13 failed）：
+
+1. `is_sensitive_path` 第 553 行对传入 path 执行 `std::fs::canonicalize` —— 真实存在的路径会被展开为**长路径**（8.3 短名展开），如 `C:\Users\RUNNER~1\AppData\Local\Temp\piccraft_test_crop_ok\src.png` → `C:\Users\runneradmin\AppData\Local\Temp\piccraft_test_crop_ok\src.png`。
+2. `std::env::temp_dir()` 在 GitHub Actions runner 上返回 **8.3 短路径** `C:\Users\RUNNER~1\AppData\Local\Temp`（runner 的 TEMP 环境变量就是短名形式）。
+3. 原豁免（85abbfc 版）只用 temp_dir 原始字符串做比较：canonicalized 长路径 `c:\users\runneradmin\...` 与短名 base `c:\users\runner~1\appdata\local\temp` 不匹配 → 落到 `\appdata\` 规则 → 误判敏感。
+
+本地机器（用户名 76020 纯数字，无 8.3 别名）canonicalize 前后字符串一致，本地测试全过；此为远端环境专属差异，本地无法端到端复现真实短名。
+
+### 修复内容（`src-tauri/src/image_ops.rs`，生产代码 + 测试，委派范围内）
+
+1. **新增纯函数 `is_under_temp_dir(path_ref, temp_raw_ref, temp_canon_ref)`**（行 553-565）：分别用「canonicalize 后的 temp 目录」与「原始 temp_dir() 字符串」两组 base 做相等/前缀比较，任一匹配即放行；base 先去掉尾分隔符；空 base 不匹配（不 panic）。抽纯函数仅为让短名场景可单测，无其它重构。
+2. **`is_sensitive_path` temp 豁免重写**（行 570-586）：先 `canonicalize(temp_dir())`（失败则回退原始值，与旧行为等价），对两者统一做小写化 + UNC 前缀剥离后传入 `is_under_temp_dir`。函数其余行为不变（Windows 敏感前缀、`\appdata\` 规则、小写化、UNC 前缀剥离）。
+3. **新增测试 2 个**（行 1169-1213，纯函数 seam，模拟矩阵不依赖本机真实短名）：
+   - `test_is_under_temp_dir_short_long_name_matrix`：temp 短名 `c:\users\runner~1\appdata\local\temp` + canonical 长名 `c:\users\runneradmin\appdata\local\temp`；canonicalized 长路径 temp 自身 → 放行；长路径子文件 → 放行；原始短名路径（canonicalize 失败兜底场景）→ 放行；假用户路径 `c:\users\someuser\appdata\local\temp` → 不放行（安全边界护栏）。
+   - `test_is_under_temp_dir_edge_cases_no_panic`：空 base/空 path 边界不 panic；base 带尾分隔符时同样放行。
+
+### TDD 证据
+
+- **RED**：测试先行（仅添加上述 2 个测试，生产函数未实现），`cargo test --locked` 编译失败：
+
+```
+error[E0425]: cannot find function `is_under_temp_dir` in this scope   (×8)
+error: could not compile `piccarft` (lib test) due to 8 previous errors
+```
+
+- **GREEN**：实现 `is_under_temp_dir` 并接入后，定向 `cargo test --locked is_sensitive` 5 passed、`cargo test --locked is_under_temp_dir` 2 passed；全量 `cargo test --locked` **58 passed**（基线 56 → +2），连续 2 次运行稳定（3.75s / 3.71s）；`cargo check --locked` 通过（`Finished dev profile`）；`git diff --check` 无输出（通过）。
+- 既有 `is_sensitive_path` 测试（`temp_dir_itself_exempt`、`temp_dir_exempt`、`other_appdata_still_rejected` 等）在新实现下全部通过——它们构成端到端验证，在远端 runner 上才是真实 8.3 短名场景。
+- `cargo fmt --check` / `cargo clippy` 未运行（与上一返工段口径一致：clippy 4 处、fmt 违规均为基线存量，本次不越权处理）。
+
+### 行号（当前 HEAD 工作区）
+
+- `is_under_temp_dir` 纯函数：`src-tauri/src/image_ops.rs:553-565`（注释 `:551-552`）
+- `is_sensitive_path` temp 豁免重写：`:566`（函数）、`:570-586`（豁免块，`:576` 为 `temp_dir_raw`、`:585` 为调用点）
+- 新测试：`:1169`（短名/长名矩阵）、`:1197`（空 base/尾分隔符边界）
+
+### 未决项
+
+- 未提交、未推送、未关闭 PLAN；仅改动 `src-tauri/src/image_ops.rs` 与本回执返工段，未触碰工作区其它既有变更（含上一返工段的未提交改动）。
+- **本地验证边界（诚实记录）**：本地无法端到端复现 8.3 短名（用户名 76020 无短名别名），短名逻辑由「字符串模拟矩阵测试」覆盖，真实短名场景需由下一轮远端 CI（`cargo test --locked`）验证。

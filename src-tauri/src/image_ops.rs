@@ -548,6 +548,20 @@ fn check_file_size_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// 判断 path_ref 是否位于 temp 目录下（分别比较 canonicalized 与原始两种形式，
+/// 容忍 8.3 短名差异：path 经 canonicalize 展开为长名，temp_dir() 可能返回短名）
+fn is_under_temp_dir(path_ref: &str, temp_raw_ref: &str, temp_canon_ref: &str) -> bool {
+    let canon_base = temp_canon_ref.strip_suffix('\\').unwrap_or(temp_canon_ref);
+    if !canon_base.is_empty()
+        && (path_ref == canon_base || path_ref.starts_with(&format!("{canon_base}\\")))
+    {
+        return true;
+    }
+    let raw_base = temp_raw_ref.strip_suffix('\\').unwrap_or(temp_raw_ref);
+    !raw_base.is_empty()
+        && (path_ref == raw_base || path_ref.starts_with(&format!("{raw_base}\\")))
+}
+
 /// 检查路径是否属于系统敏感目录
 fn is_sensitive_path(path: &str) -> bool {
     let canonical = std::fs::canonicalize(path)
@@ -556,13 +570,19 @@ fn is_sensitive_path(path: &str) -> bool {
     // 去除 Windows UNC 前缀（\\?\）
     let path_ref = path_str.strip_prefix(r"\\?\").unwrap_or(&path_str);
 
-    // 系统临时目录豁免（temp 目录自身及其子路径，容忍 canonicalize/temp_dir 尾分隔符差异）
-    let temp_dir_str = std::env::temp_dir().to_string_lossy().to_lowercase();
-    let temp_dir_ref = temp_dir_str.strip_prefix(r"\\?\").unwrap_or(&temp_dir_str);
-    let temp_dir_base = temp_dir_ref.strip_suffix('\\').unwrap_or(temp_dir_ref);
-    if !temp_dir_base.is_empty()
-        && (path_ref == temp_dir_base || path_ref.starts_with(&format!("{temp_dir_base}\\")))
-    {
+    // 系统临时目录豁免（temp 目录自身及其子路径）。
+    // canonicalize 会把路径展开为长名（8.3 短名展开），而 temp_dir() 可能返回短名
+    // （如 GitHub Actions runner 的 RUNNER~1），故同时比较两种形式，任一匹配即放行
+    let temp_dir_raw = std::env::temp_dir();
+    let temp_canon = std::fs::canonicalize(&temp_dir_raw)
+        .unwrap_or_else(|_| temp_dir_raw.clone());
+    let norm = |p: &PathBuf| -> String {
+        let s = p.to_string_lossy().to_lowercase();
+        s.strip_prefix(r"\\?\").unwrap_or(&s).to_string()
+    };
+    let temp_raw_ref = norm(&temp_dir_raw);
+    let temp_canon_ref = norm(&temp_canon);
+    if is_under_temp_dir(path_ref, &temp_raw_ref, &temp_canon_ref) {
         return false;
     }
 
@@ -1142,6 +1162,48 @@ mod tests {
         ));
         assert!(is_sensitive_path(
             r"C:\Users\someuser\AppData\Roaming\config"
+        ));
+    }
+
+    #[test]
+    fn test_is_under_temp_dir_short_long_name_matrix() {
+        // 模拟 GitHub Actions runner 的 8.3 短名场景（不依赖本机真实短名）：
+        // temp_dir() 返回短名形式（runner~1），canonicalize 后展开为长名形式（runneradmin）
+        let temp_raw = r"c:\users\runner~1\appdata\local\temp";
+        let temp_canon = r"c:\users\runneradmin\appdata\local\temp";
+        // canonicalized 长路径：temp 目录自身 → 放行
+        assert!(is_under_temp_dir(temp_canon, temp_raw, temp_canon));
+        // canonicalized 长路径：temp 子路径文件 → 放行
+        assert!(is_under_temp_dir(
+            r"c:\users\runneradmin\appdata\local\temp\sub\x.png",
+            temp_raw,
+            temp_canon
+        ));
+        // 原始短名路径（未 canonicalize 的字符串，canonicalize 失败兜底场景）→ 放行
+        assert!(is_under_temp_dir(
+            r"c:\users\runner~1\appdata\local\temp\sub\x.png",
+            temp_raw,
+            temp_canon
+        ));
+        // 假用户路径 → 不放行（护栏：安全边界不得放宽）
+        assert!(!is_under_temp_dir(
+            r"c:\users\someuser\appdata\local\temp",
+            temp_raw,
+            temp_canon
+        ));
+    }
+
+    #[test]
+    fn test_is_under_temp_dir_edge_cases_no_panic() {
+        // 空 base / 空 path 边界不 panic
+        assert!(!is_under_temp_dir("", "", ""));
+        assert!(!is_under_temp_dir(r"c:\x\y.png", "", ""));
+        assert!(!is_under_temp_dir("", r"c:\temp", r"c:\temp"));
+        // temp base 带尾分隔符（temp_dir() 返回形式）时同样放行
+        assert!(is_under_temp_dir(
+            r"c:\temp\x.png",
+            r"c:\temp\",
+            r"c:\temp\"
         ));
     }
 
