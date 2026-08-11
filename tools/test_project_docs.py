@@ -6,6 +6,8 @@
 """
 import io
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -233,6 +235,23 @@ class TestContext(ProjectDocsTestCase):
         code, _ = run(project_docs.cmd_context,
                       SimpleNamespace(text="zzz 无命中词", topic=None, source=None))
         self.assertEqual(code, 2)
+
+
+class TestCliEncoding(unittest.TestCase):
+    """子进程级回归：CI Windows runner stdout 为 cp1252，中文输出必须不崩。"""
+
+    def test_index_check_survives_cp1252_stdio(self):
+        script = Path(__file__).resolve().parent / "project_docs.py"
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "cp1252"
+        proc = subprocess.run([sys.executable, str(script), "index", "check"],
+                              env=env, capture_output=True)
+        self.assertEqual(proc.returncode, 0,
+                         "cp1252 下 index check 不得崩溃：" +
+                         proc.stderr.decode("utf-8", "replace"))
+        self.assertNotIn(b"Traceback", proc.stderr, "stderr 不得出现 traceback")
+        self.assertIn("索引健康".encode("utf-8"), proc.stdout,
+                      "stdout 应输出 UTF-8 中文结果")
 
 
 if __name__ == "__main__":

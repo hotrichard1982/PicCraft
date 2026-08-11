@@ -174,7 +174,16 @@ def cmd_index(args):
   index.write_text(header+'\n'+'\n'.join(rows)+'\n',encoding='utf-8')
  print('索引已从文档元数据重建'+('（跳过 %d 个手工索引）'%len(skipped) if skipped else ''));return 0
 
+def _force_utf8_stdio():
+ # CI Windows runner stdout 为 cp1252，含中文的 print 必抛 UnicodeEncodeError；统一重配置 UTF-8（replace 容错，不改变任何子命令行为）
+ for stream in (sys.stdout,sys.stderr):
+  try:
+   reconfigure=getattr(stream,'reconfigure',None)
+   if reconfigure and stream.encoding and stream.encoding.lower() not in ('utf-8','utf-8-sig'):reconfigure(encoding='utf-8',errors='replace')
+  except Exception:pass
+
 def main():
+ _force_utf8_stdio()
  parser=argparse.ArgumentParser();subs=parser.add_subparsers(dest='cmd',required=True)
  context=subs.add_parser('context');context.add_argument('text',nargs='?',default='');context.add_argument('--topic');context.add_argument('--from',dest='source')
  new=subs.add_parser('new');new.add_argument('kind',choices=['adr','prd','bug','plan']);new.add_argument('title',nargs='?');new.add_argument('--from',dest='source');new.add_argument('--topics',nargs='*')
