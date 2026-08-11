@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/store"
+import { getPlatform } from "@/lib/platform"
 
 // ─── 5 个支持的图片格式（CONTEXT.md §8）───
 const FORMATS = ["jpg", "jpeg", "png", "webp", "bmp"] as const
@@ -18,8 +19,13 @@ const NAV_ITEMS: Array<{ key: SubTab; label: string; icon: React.ReactNode }> = 
   { key: "about", label: "关于", icon: <Info className="size-4" /> },
 ]
 
-// ─── 子 Tab 1：设置 ───
+// ─── 子 Tab 1：设置（按平台分支：macOS 只读说明，Windows 勾选关联）───
 function SettingsSubTab() {
+  return getPlatform() === "macos" ? <MacOSFileAssocSubTab /> : <WindowsFileAssocSubTab />
+}
+
+// Windows：现有文件关联勾选 UI（保持不变）
+function WindowsFileAssocSubTab() {
   const fileAssoc = useAppStore((s) => s.settings.fileAssoc)
   const setSettings = useAppStore((s) => s.setSettings)
 
@@ -117,6 +123,58 @@ function SettingsSubTab() {
                 已保存
               </span>
             )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+// macOS：只读展示支持格式 + Finder 默认应用设置教程（不提供假的动态关联勾选，PRD-002）
+function MacOSFileAssocSubTab() {
+  return (
+    <div className="flex justify-center pt-8 px-6 pb-8">
+      <Card className="w-full max-w-lg">
+        <CardContent className="pt-6 space-y-5">
+          {/* 标题区 */}
+          <div className="space-y-1">
+            <h3 className="text-base font-semibold flex items-center gap-2">
+              <Settings className="size-4 text-muted-foreground" />
+              关联图片格式
+            </h3>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              PicCraft 支持以下图片格式。macOS 上通过 Finder 的「打开方式」设置默认打开应用。
+            </p>
+          </div>
+
+          <Separator />
+
+          {/* 支持格式（只读列表） */}
+          <div className="grid grid-cols-2 gap-2">
+            {FORMATS.map((ext) => (
+              <div
+                key={ext}
+                className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-muted/30 select-none"
+              >
+                <span className="text-sm font-medium">.{ext}</span>
+              </div>
+            ))}
+          </div>
+
+          <Separator />
+
+          {/* Finder 默认应用设置教程 */}
+          <div className="space-y-2">
+            <h4 className="text-sm font-semibold flex items-center gap-2">
+              <ExternalLink className="size-4 text-muted-foreground" />
+              设置 Finder 默认打开方式
+            </h4>
+            <ol className="text-sm text-muted-foreground leading-relaxed list-decimal pl-5 space-y-1">
+              <li>在 Finder 中右键点击图片</li>
+              <li>选择「显示简介」</li>
+              <li>在「打开方式」中选择 PicCraft</li>
+              <li>点击「全部更改」应用到所有同格式图片</li>
+            </ol>
           </div>
         </CardContent>
       </Card>

@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
+import { getPlatform, revealItemLabel } from "@/lib/platform"
 import { useAppStore, type QueueItem } from "@/store"
 
 interface QueuePanelProps {
@@ -31,12 +32,12 @@ interface ContextMenuState {
 
 type ContextAction = "remove" | "open" | "copy" | "reveal"
 
-// 静态菜单项（模块作用域，避免每次渲染重建）
+// 静态菜单项（模块作用域，避免每次渲染重建；reveal 文案平台化：macOS → Finder）
 const CONTEXT_MENU_ITEMS: { key: ContextAction; label: string; icon: React.ReactNode; destructive?: boolean }[] = [
   { key: "remove",  label: "移除",              icon: <X className="size-3.5" />, destructive: true },
   { key: "open",    label: "在单图编辑中打开",  icon: <Pencil className="size-3.5" /> },
   { key: "copy",    label: "复制文件路径",      icon: <Copy className="size-3.5" /> },
-  { key: "reveal",  label: "在资源管理器中显示", icon: <ExternalLink className="size-3.5" /> },
+  { key: "reveal",  label: revealItemLabel(getPlatform()), icon: <ExternalLink className="size-3.5" /> },
 ]
 
 // 进度条动画样式已移至 index.css（qp-progress-slide / qp-progress-bar）

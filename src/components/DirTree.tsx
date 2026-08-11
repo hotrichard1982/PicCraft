@@ -154,7 +154,7 @@ export function DirTree({ currentFolder, onSelectDirectory }: DirTreeProps) {
 
   return (
     <div ref={treeRef} className="text-sm overflow-y-auto overflow-x-hidden flex-1">
-      {/* 根节点：此电脑 */}
+      {/* 根节点：文件系统（平台中性名称，PRD-002） */}
       <div
         data-tree-root
         className={`flex items-center gap-1 px-2 py-1.5 cursor-pointer select-none transition-colors hover:bg-accent/50`}
@@ -170,7 +170,7 @@ export function DirTree({ currentFolder, onSelectDirectory }: DirTreeProps) {
           />
         )}
         <FolderOpen className="size-4 shrink-0 text-primary/70" />
-        <span className="truncate font-medium">此电脑</span>
+        <span className="truncate font-medium">文件系统</span>
       </div>
 
       {/* 子节点 */}

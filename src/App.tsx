@@ -8,21 +8,13 @@ import { SingleTab } from "@/components/SingleTab"
 import { BatchTab } from "@/components/BatchTab"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { useAppStore, type ViewName } from "@/store"
+import { applyRoutePlan, finderOpenedToRoute, resolveRoute, type StartupRouteArgs } from "@/lib/startup-route"
 import { BrowseView } from "@/views/BrowseView"
 import { SettingsView } from "@/views/SettingsView"
-
-interface StartupArgs {
-  mode: "cold" | "browse" | "edit"
-  file: string | null
-  folder: string | null
-}
 
 function App() {
   const currentView = useAppStore((s) => s.currentView)
   const setView = useAppStore((s) => s.setView)
-  const setCurrentFolder = useAppStore((s) => s.setCurrentFolder)
-  const setEditingFile = useAppStore((s) => s.setEditingFile)
-  const setBrowseTargetFile = useAppStore((s) => s.setBrowseTargetFile)
   const hydrate = useAppStore((s) => s.hydrate)
 
   const [ready, setReady] = useState(false)
@@ -30,7 +22,7 @@ function App() {
   // ─── 启动：hydrate 持久化 + 读启动参数 + 路由 ───
   useEffect(() => {
     let cancelled = false
-    // 4) 检查文件关联状态（延迟执行，不阻塞启动）
+    // 4) 检查文件关联状态（延迟执行，不阻塞启动；非 Windows 由 Rust 端返回 open_ok=true 直接放行）
     // setTimeout 在 effect 顶层创建，便于 effect 清理（react-doctor/effect-needs-cleanup）
     const assocTimer = setTimeout(() => {
       void (async () => {
@@ -58,9 +50,9 @@ function App() {
       await hydrate()
 
       // 2) 读启动参数
-      let args: StartupArgs | null = null
+      let args: StartupRouteArgs | null = null
       try {
-        args = await invoke<StartupArgs>("read_startup_args")
+        args = await invoke<StartupRouteArgs>("read_startup_args")
         console.info("[App] startup args:", args)
       } catch (e) {
         console.warn("[App] read_startup_args failed:", e)
@@ -68,28 +60,10 @@ function App() {
 
       if (cancelled) return
 
-      // 3) 根据 args 路由
-      if (args?.mode === "edit" && args.file) {
-        setView("single")
-        setEditingFile(args.file)
-      } else if (args?.mode === "browse" && args.folder) {
-        setView("browse")
-        setCurrentFolder(args.folder)
-      } else if (args?.mode === "browse" && args.file) {
-        // 双击图片：用文件所在目录 + 标记目标文件自动全屏
-        setView("browse")
-        const sep = args.file.lastIndexOf("\\") >= 0 ? "\\" : "/"
-        const folder = args.file.substring(0, args.file.lastIndexOf(sep))
-        if (folder) {
-          setCurrentFolder(folder)
-          setBrowseTargetFile(args.file)
-        }
-      } else {
-        // cold 或 browse 无指定目录：使用上次打开的目录
-        setView("browse")
-        const cur = useAppStore.getState().lastFolder
-        if (cur) setCurrentFolder(cur)
-      }
+      // 3) 根据 args 路由（与 startup-args-updated / finder-opened 共用同一语义）
+      applyRoutePlan(
+        resolveRoute(args ?? { mode: "cold", file: null, folder: null }, useAppStore.getState().lastFolder),
+      )
 
       setReady(true)
     })()
@@ -97,37 +71,29 @@ function App() {
       cancelled = true
       clearTimeout(assocTimer)
     }
-  }, [hydrate, setView, setCurrentFolder, setEditingFile, setBrowseTargetFile])
+  }, [hydrate])
 
-  // ─── 监听 single-instance 转发（第二次启动）───
+  // ─── 监听 single-instance 转发（第二次启动）与 Finder 打开事件（macOS）───
   useEffect(() => {
-    let unlisten: (() => void) | null = null
+    const unlistens: Array<() => void> = []
     ;(async () => {
-      const u = await listen<StartupArgs>("startup-args-updated", async (event) => {
-        const a = event.payload
-        if (a.mode === "edit" && a.file) {
-          setView("single")
-          setEditingFile(a.file)
-        } else if (a.mode === "browse") {
-          setView("browse")
-          if (a.folder) {
-            setCurrentFolder(a.folder)
-          } else if (a.file) {
-            const sep = a.file.lastIndexOf("\\") >= 0 ? "\\" : "/"
-            const folder = a.file.substring(0, a.file.lastIndexOf(sep))
-            if (folder) {
-              setCurrentFolder(folder)
-              setBrowseTargetFile(a.file)
-            }
-          }
-        }
-      })
-      unlisten = u
+      // single-instance argv 转发（payload：StartupRouteArgs）
+      unlistens.push(
+        await listen<StartupRouteArgs>("startup-args-updated", (event) => {
+          applyRoutePlan(resolveRoute(event.payload, useAppStore.getState().lastFolder))
+        }),
+      )
+      // Finder 打开事件（WORK-004-01 约定：payload 为完整路径数组，原顺序）
+      unlistens.push(
+        await listen<string[]>("finder-opened", (event) => {
+          applyRoutePlan(resolveRoute(finderOpenedToRoute(event.payload), useAppStore.getState().lastFolder))
+        }),
+      )
     })()
     return () => {
-      unlisten?.()
+      unlistens.forEach((u) => u())
     }
-  }, [setView, setCurrentFolder, setEditingFile, setBrowseTargetFile])
+  }, [])
 
   if (!ready) {
     return (

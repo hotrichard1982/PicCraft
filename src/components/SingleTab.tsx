@@ -15,6 +15,7 @@ import {
   aspectWidthForHeight,
   type ImageInfo,
 } from "@/lib/single-tab-state"
+import { getPlatform, matchSaveShortcut, saveShortcutHint } from "@/lib/platform"
 import { FolderOpen, RotateCcw, Save, Download, ListPlus } from "lucide-react"
 
 interface ImageResult {
@@ -255,13 +256,15 @@ export function SingleTab() {
     }
   }, [editingFile, img.filePath, loadImage, setEditingFile])
 
-  // ─── Keyboard Shortcuts ───
+  // ─── Keyboard Shortcuts（平台化：macOS 用 Cmd，其余平台保持 Ctrl）───
   useEffect(() => {
+    const platform = getPlatform()
     const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key === "S") {
+      const kind = matchSaveShortcut(e, platform)
+      if (kind === "saveAs") {
         e.preventDefault()
         handleSaveAs()
-      } else if (e.ctrlKey && e.key === "s") {
+      } else if (kind === "overwrite") {
         e.preventDefault()
         handleOverwrite()
       }
@@ -419,7 +422,7 @@ export function SingleTab() {
             <Button size="sm" variant="outline" className="w-full" disabled={!img.hasImage} onClick={handleEnqueueAndNext}>
               <ListPlus className="size-3 mr-1" />加入队列并打开下一张
             </Button>
-            <p className="text-[10px] text-muted-foreground text-right">Ctrl+S 覆盖原图 | Ctrl+Shift+S 另存为</p>
+            <p className="text-[10px] text-muted-foreground text-right">{saveShortcutHint(getPlatform())}</p>
           </div>
         </div>
       </div>
