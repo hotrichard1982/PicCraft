@@ -60,7 +60,8 @@ jobs:
 
   macos:
     # macOS 质量门禁 + 双架构 DMG 构建（WORK-004-04）
-    # 原生 runner 按架构构建：macos-14 = Apple Silicon(arm64)，macos-13 = Intel(x64)
+    # arm64 = macos-14 原生构建；x64 = macos-14 交叉编译 x86_64-apple-darwin
+    # （返工：macos-13 Intel 公共 runner 排队拥堵不可控，改同机交叉编译；macOS 系统框架跨 arch 可用，无需额外 env）
     # 不签名、不公证、不创建 Release、不打 tag、无 secrets
     name: macOS 质量门禁 (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
@@ -71,7 +72,7 @@ jobs:
           - arch: arm64
             runner: macos-14
           - arch: x64
-            runner: macos-13
+            runner: macos-14
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -112,13 +113,27 @@ jobs:
       - name: 文档索引检查
         run: python tools/project_docs.py index check
 
-      - name: 构建 macOS DMG（tauri.macos.conf.json 自动合并）
-        run: npx tauri build
+      - name: 安装交叉编译 target（仅 x64）
+        if: matrix.arch == 'x64'
+        run: rustup target add x86_64-apple-darwin
+
+      - name: 构建 macOS DMG（tauri.macos.conf.json 自动合并；x64 交叉编译）
+        run: |
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            npx tauri build --target x86_64-apple-darwin
+          else
+            npx tauri build
+          fi
 
       - name: 重命名 DMG（命名含架构）
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          mv src-tauri/target/release/bundle/dmg/*.dmg "PicCraft_${VERSION}_${{ matrix.arch }}.dmg"
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            DMG_DIR=src-tauri/target/x86_64-apple-darwin/release/bundle/dmg
+          else
+            DMG_DIR=src-tauri/target/release/bundle/dmg
+          fi
+          mv "$DMG_DIR"/*.dmg "PicCraft_${VERSION}_${{ matrix.arch }}.dmg"
           ls -lh PicCraft_*.dmg
 
       - name: 断言 DMG 内产物（架构 + Info.plist identifier/文件关联）
