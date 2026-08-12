@@ -200,12 +200,18 @@ error: could not compile `piccarft` (lib test) due to 44 previous errors
 | `git diff --check` | 无输出（通过） |
 | `cargo fmt --check` | 仅报存量 `build.rs` 格式差异（本次未触碰该文件），本返工改动两文件无格式差异 |
 
-### 远端复验（Run ID 见下）
+### 远端复验（Run 31547117391，push a7d2cca）
 
-- 触发：push 分支 `feat/macos-support` 后由 CI 新 Run 复验
-- Run：`gh run list --branch feat/macos-support` 最新 Run = <待填>
-- macOS arm64 Rust 测试结果：<待填>
-- 结论：<待填>
+- **macOS arm64（job 93961888929）**：Rust 测试步骤 **57 passed / 0 failed**（`test result: ok. 57 passed`，与返工段一预测的 57 一致），其中 `test tests::test_parse_opened_urls_directory ... ok` —— 本返工修复目标达成
+- job 最终失败于 workflow 最后一个「产物架构校验」步骤（**非测试代码问题**，且该步骤在历史 Run 31543334421 中因测试步骤先行失败从未执行到）：
+  ```
+  fatal error: .../lipo: can't open input file: src-tauri/target/release/bundle/macos/piccarft.app/Contents/MacOS/piccarft (No such file or directory)
+  ##[error]Process completed with exit code 1.
+  ```
+  根因：tauri `tauri build` 先产 `bundle/macos/piccarft.app` 再打 DMG，`bundle_dmg.sh` 完成时清理/移除了中间 `.app`（日志：`Cleaning .../bundle/macos/piccarft.app`、`Finished 1 bundle at: .../piccarft_0.3.0_aarch64.dmg`），而 workflow 的 lipo 架构校验仍指向已不存在的 `.app` 路径。属 WORK-004-04 的 workflow 缺陷，按任务边界未修改 workflow，移交主代理。
+- **macOS x64（job 93961888868）**：截至复验结束仍 `queued`（公共 macOS runner 队列拥堵，>15 分钟未开始），结论未出；与 arm64 同 workflow、同代码，预期同结论。
+- **Windows 质量门禁（job 93961888843）**：`success`。
+- 结论：本返工目标（macOS arm64 Rust 测试全绿）已达成；Run 整体非绿由 workflow 产物校验缺陷导致，与本次代码改动无关。
 
 ### 本返工段改动文件
 
