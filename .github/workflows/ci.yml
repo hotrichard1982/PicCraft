@@ -115,24 +115,15 @@ jobs:
       - name: 构建 macOS DMG（tauri.macos.conf.json 自动合并）
         run: npx tauri build
 
-      - name: 验证产物架构
-        run: |
-          BIN="src-tauri/target/release/bundle/macos/piccarft.app/Contents/MacOS/piccarft"
-          ARCHS=$(lipo -archs "$BIN")
-          echo "二进制架构: $ARCHS"
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            [[ "$ARCHS" == *"arm64"* ]] || { echo "::error::产物架构不符合 arm64"; exit 1; }
-          else
-            [[ "$ARCHS" == *"x86_64"* ]] || { echo "::error::产物架构不符合 x86_64"; exit 1; }
-          fi
-
       - name: 重命名 DMG（命名含架构）
         run: |
           VERSION=$(node -p "require('./package.json').version")
           mv src-tauri/target/release/bundle/dmg/*.dmg "PicCraft_${VERSION}_${{ matrix.arch }}.dmg"
           ls -lh PicCraft_*.dmg
 
-      - name: 断言 DMG 内 Info.plist（identifier + 文件关联）
+      - name: 断言 DMG 内产物（架构 + Info.plist identifier/文件关联）
+        # tauri 打 DMG 后 bundle_dmg.sh 会清理中间 bundle/macos/*.app，
+        # 架构校验只能对 DMG 挂载后的 .app 执行（与 Info.plist 断言共用一次挂载）
         run: |
           DMG=$(ls PicCraft_*.dmg)
           ATTACH=$(hdiutil attach -nobrowse -readonly "$DMG")
@@ -140,6 +131,15 @@ jobs:
           echo "挂载点: $MOUNT"
           APP=$(find "$MOUNT" -maxdepth 1 -name "*.app" | head -1)
           [ -n "$APP" ] || { echo "::error::DMG 内未找到 .app"; exit 1; }
+          BIN="$APP/Contents/MacOS/piccarft"
+          [ -f "$BIN" ] || { echo "::error::DMG 内 .app 缺少二进制: $BIN"; exit 1; }
+          ARCHS=$(lipo -archs "$BIN")
+          echo "二进制架构: $ARCHS"
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            [[ "$ARCHS" == *"arm64"* ]] || { echo "::error::产物架构不符合 arm64"; exit 1; }
+          else
+            [[ "$ARCHS" == *"x86_64"* ]] || { echo "::error::产物架构不符合 x86_64"; exit 1; }
+          fi
           MOUNT="$MOUNT" APP="$APP" python - <<'EOF'
           import os, plistlib
           mount, app = os.environ["MOUNT"], os.environ["APP"]
