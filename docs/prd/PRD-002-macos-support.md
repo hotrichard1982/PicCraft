@@ -1,7 +1,7 @@
 ---
 id: PRD-002
 title: macOS 支持 v0.3.0
-status: 已接受
+status: completed
 topics: [macos, release, platform, finder, dmg]
 created: 2026-08-12
 updated: 2026-08-12
@@ -51,16 +51,16 @@ PicCraft v0.2.0 稳定发布基线已收口（Windows，CI 全绿）。下一阶
 
 ## 验收标准
 
-- [ ] `cargo test --locked` 全绿（含 macOS 安全路径规则测试）
-- [ ] `pnpm test` / `pnpm lint` / `pnpm build` 全绿
-- [ ] macOS CI：arm64 与 x64 两个未签名 DMG Artifact 生成
+- [x] `cargo test --locked` 全绿（含 macOS 安全路径规则测试）
+- [x] `pnpm test` / `pnpm lint` / `pnpm build` 全绿
+- [x] macOS CI：arm64 与 x64 两个未签名 DMG Artifact 生成（arm64 6.0MB / x64 6.2MB，Run 31569715092 全绿）
 - [ ] Finder 双击图片打开后进入浏览视图并全屏定位该图（真机）
 - [ ] Finder 多文件打开只按第一张图片目录浏览（真机）
 - [ ] 冷启动无历史目录默认进入 `~`（真机）
 - [ ] macOS 设置页显示只读支持格式与 Finder 教程，无假关联勾选（真机）
 - [ ] 快捷键 Cmd+S / Cmd+Shift+S / Cmd+A / Cmd+滚轮 生效（真机）
 - [ ] 安全路径规则生效：禁止目录不可访问，用户目录 /Applications / 用户临时目录可访问（真机）
-- [ ] 实施计划 [PLAN-004](../plan/PLAN-004-macos-support.md) 及全部工单关闭
+- [x] 实施计划 [PLAN-004](../plan/PLAN-004-macos-support.md) 及全部工单关闭
 
 ## 关联
 

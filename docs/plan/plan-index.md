@@ -17,9 +17,9 @@
 | WORK-003-04 | [批量确认前端测试](WORK-003-04-batch-confirm-frontend-tests.md) | PLAN-003 | ✅ 已验收 |
 | WORK-003-05 | [可复现构建 CI](WORK-003-05-reproducible-build-ci.md) | PLAN-003 | ✅ 已验收 |
 | WORK-003-06 | [文档工具治理](WORK-003-06-doc-tooling-governance.md) | PLAN-003 | ✅ 已验收 |
-| PLAN-004 | [macOS 适配总计划](PLAN-004-macos-support.md) | PRD-002 | 🚧 实施中 |
-| WORK-004-01 | [Rust 平台安全路径与打开事件](WORK-004-01-rust-platform-paths-opened-event.md) | PLAN-004 | 待开始 |
-| WORK-004-02 | [前端平台交互](WORK-004-02-frontend-platform-interaction.md) | PLAN-004 | 待开始 |
-| WORK-004-03 | [Tauri macOS 打包配置](WORK-004-03-tauri-macos-bundle-config.md) | PLAN-004 | 待开始 |
-| WORK-004-04 | [CI macOS 双架构构建](WORK-004-04-ci-macos-double-arch.md) | PLAN-004 | 待开始 |
-| WORK-004-05 | [发布文档与 Gatekeeper 指南](WORK-004-05-docs-gatekeeper-release.md) | PLAN-004 | 待开始 |
+| PLAN-004 | [macOS 适配总计划](PLAN-004-macos-support.md) | PRD-002 | ✅ 已完成 |
+| WORK-004-01 | [Rust 平台安全路径与打开事件](WORK-004-01-rust-platform-paths-opened-event.md) | PLAN-004 | ✅ 已验收 |
+| WORK-004-02 | [前端平台交互](WORK-004-02-frontend-platform-interaction.md) | PLAN-004 | ✅ 已验收 |
+| WORK-004-03 | [Tauri macOS 打包配置](WORK-004-03-tauri-macos-bundle-config.md) | PLAN-004 | ✅ 已验收 |
+| WORK-004-04 | [CI macOS 双架构构建](WORK-004-04-ci-macos-double-arch.md) | PLAN-004 | ✅ 已验收 |
+| WORK-004-05 | [发布文档与 Gatekeeper 指南](WORK-004-05-docs-gatekeeper-release.md) | PLAN-004 | ✅ 已验收 |

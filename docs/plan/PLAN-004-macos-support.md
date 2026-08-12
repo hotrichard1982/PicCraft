@@ -1,13 +1,12 @@
 ---
 id: PLAN-004
 title: macOS 适配实施计划
-status: implementing
+status: completed
 source: PRD-002
 topics: [macos, release, platform, finder, dmg, ci]
 created: 2026-08-12
 updated: 2026-08-12
 ---
-
 # PLAN-004 macOS 适配实施计划
 
 ## 开发前知识检查
@@ -84,21 +83,24 @@ updated: 2026-08-12
 
 ## 测试与验证
 
-- [ ] 已运行要求的测试
+- [x] 已运行要求的测试
 - 测试命令：各 WORK 验证命令；总收口：`cd src-tauri && cargo test`、`pnpm lint`、`pnpm test`、`pnpm build`、`python tools/project_docs.py validate`、`python tools/project_docs.py index check`、macOS CI 双架构产物验证
 - 测试结果：
+  - 本地（Windows）：`cargo test --locked` 72 passed；`pnpm test` 115 通过；`pnpm lint` 零错误；`pnpm build` 成功；react-doctor 54 持平基线；`validate` 零断链；`index check` 健康
+  - 远端 CI（feat/macos-support，Run 31569715092）：Windows 质量门禁 success；**macOS arm64 success**（原生构建 + DMG 断言 + Artifact 6.0MB）；**macOS x64 success**（macos-14 交叉编译 x86_64-apple-darwin + Artifact 6.2MB）；lipo 架构断言（arm64/x86_64）与 Info.plist 断言（CFBundleIdentifier=com.cq30.piccarft、CFBundleTypeExtensions 含 jpg/jpeg/png/webp/bmp）全部通过
+  - macOS 平台化返工闭环：① 测试尾斜杠（macOS temp_dir 尾 `/`，Run 31543334421 暴露）→ ② lipo 路径（bundle_dmg.sh 清理中间 .app，Run 31547117391 暴露）→ ③ x64 runner 拥堵改交叉编译（用户确认）；均有 RED 证据与复验
 
 ## 文档同步
 
-- [ ] 已更新来源 PRD 或 BUG
-- [ ] 已更新受影响项目文档
-- [ ] 已更新相关索引
+- [x] 已更新来源 PRD 或 BUG
+- [x] 已更新受影响项目文档
+- [x] 已更新相关索引
 
 ## 收口检查
 
-- [ ] 工单回执完整
-- [ ] 实施步骤全部完成
-- [ ] 测试通过并记录结果
-- [ ] 来源文档状态已更新
-- [ ] 受影响文档已更新
-- [ ] 索引已同步
+- [x] 工单回执完整
+- [x] 实施步骤全部完成
+- [x] 测试通过并记录结果
+- [x] 来源文档状态已更新
+- [x] 受影响文档已更新
+- [x] 索引已同步

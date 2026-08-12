@@ -69,3 +69,35 @@ WORK-004-04「CI macOS 双架构构建」：GitHub Actions 新增 macOS job（ar
 
 - **macOS x64 job 仍未跑完**：公共 macOS-13（Intel）runner 排队拥堵，自 Run 触发起持续 queued（截至回执更新时约 2 小时，Run 整体仍 queued，x64 尚未开始执行任何步骤）。x64 与 arm64 同 workflow、同代码、同步骤结构，仅 `lipo -archs` 期望 `x86_64`、runner 不同；预期结论与 arm64 一致。x64 job 完成后需补录结论与 Artifact 大小。
 - **arm64 job 详细日志**（`lipo -archs` 输出、CFBundleIdentifier 值等）需 Run 整体完成后从日志归档提取，当前 Run 未 complete 无法下载；步骤级结论已由 job 状态（success）确认。
+
+## 返工段（x64 交叉编译，2026-08-12，用户已确认方案）
+
+### 背景
+
+macos-13（Intel 原生 runner）公共资源拥堵，3 个 Run 的 x64 job 持续 queued 数小时不可控。用户确认改用 **macos-14（arm64 runner）交叉编译 x86_64-apple-darwin** 完成 x64 验证。
+
+### 改动（commit 8e4cedb，仅 `.github/workflows/ci.yml`，+20/-5）
+
+- 矩阵：x64 的 runner 由 macos-13 改为 macos-14（与 arm64 同机）
+- 新增「安装交叉编译 target（仅 x64）」步骤：`rustup target add x86_64-apple-darwin`（Rust 测试仍用原生 target，交叉 target 仅构建用）
+- 构建步骤按 arch 分支：x64 → `npx tauri build --target x86_64-apple-darwin`；arm64 → `npx tauri build`（原样）
+- DMG 重命名路径按 arch 分支：x64 产物在 `src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/`
+- lipo/Info.plist 断言复用既有挂载后校验（按 matrix.arch 期望 x86_64 字面量），无需改动
+- 项目依赖均为纯 Rust（image/imagequant/jpeg-decoder），无 C 库，交叉编译一次成功
+
+### 复验结果（Run 31569715092，head 8e4cedb）
+
+| job | 结论 | 说明 |
+|---|---|---|
+| macOS arm64 | success | 原生构建 + DMG 断言 + Artifact |
+| macOS x64 | **success** | 交叉编译 x86_64，lipo 断言 `x86_64` 通过，Info.plist 断言通过 |
+| Windows 质量门禁 | success | 回归全绿 |
+
+### Artifact（最终）
+
+| 名称 | 架构 | 大小 | 状态 |
+|---|---|---|---|
+| piccarft-dmg-arm64 | arm64 | 6,276,802 B（约 6.0 MB） | 已上传 |
+| piccarft-dmg-x64 | x64 | 6,525,595 B（约 6.2 MB） | 已上传 |
+
+**PRD-002 双架构验收项达成**：arm64 与 x64 两个未签名 DMG 均由 CI 产出并通过架构/标识/文件关联断言。
