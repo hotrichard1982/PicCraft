@@ -1,0 +1,84 @@
+name: BMP 崩溃复现（临时，验证后删除）
+
+on:
+  workflow_dispatch:
+
+jobs:
+  repro:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: 复现 BMP 编码崩溃
+        run: |
+          mkdir -p /tmp/bmprepro/src
+          cat > /tmp/bmprepro/Cargo.toml <<'EOF'
+          [package]
+          name = "bmprepro"
+          version = "0.1.0"
+          edition = "2021"
+          [dependencies]
+          image = { version = "0.25.10", default-features = false, features = ["bmp", "png", "jpeg"] }
+          EOF
+          cat > /tmp/bmprepro/src/main.rs <<'EOF'
+          use image::{DynamicImage, ImageBuffer, Rgb, Rgba, RgbImage, RgbaImage, Luma, LumaA};
+
+          fn try_save(name: &str, img: &DynamicImage) {
+              let r = img.save(format!("/tmp/out_{name}.bmp"));
+              println!("{name}: {:?} color={:?}", r.as_ref().map(|_| "ok"), img.color());
+          }
+
+          fn main() {
+              // 1) 各种 color 直接存 BMP
+              try_save("rgb8", &DynamicImage::ImageRgb8(RgbImage::from_pixel(207, 90, Rgb([200,100,50]))));
+              try_save("rgba8", &DynamicImage::ImageRgba8(RgbaImage::from_pixel(207, 90, Rgba([200,100,50,255]))));
+              try_save("l8", &DynamicImage::ImageLuma8(ImageBuffer::from_pixel(207, 90, Luma([128]))));
+              try_save("la8", &DynamicImage::ImageLumaA8(ImageBuffer::from_pixel(207, 90, LumaA([128, 255]))));
+              let l16: ImageBuffer<Luma<u16>, Vec<u16>> = ImageBuffer::from_pixel(207, 90, Luma([128u16]));
+              try_save("l16", &DynamicImage::ImageLuma16(l16));
+              let la16: ImageBuffer<LumaA<u16>, Vec<u16>> = ImageBuffer::from_pixel(207, 90, LumaA([128u16, 65535]));
+              try_save("la16", &DynamicImage::ImageLumaA16(la16));
+              let rgb16: ImageBuffer<Rgb<u16>, Vec<u16>> = ImageBuffer::from_pixel(207, 90, Rgb([200u16,100,50]));
+              try_save("rgb16", &DynamicImage::ImageRgb16(rgb16));
+              let rgba16: ImageBuffer<Rgba<u16>, Vec<u16>> = ImageBuffer::from_pixel(207, 90, Rgba([200u16,100,50,65535]));
+              try_save("rgba16", &DynamicImage::ImageRgba16(rgba16));
+
+              // 2) 各种位深 BMP 解码后再存 BMP（roundtrip）
+              for depth in [1u8, 4, 8, 16, 24, 32] {
+                  // 构造并保存一个该位深 BMP 太复杂，直接生成 24/32 位并 roundtrip
+              }
+              // 32-bit RGBA BMP roundtrip
+              let rgba = RgbaImage::from_pixel(207, 90, Rgba([200,100,50,128]));
+              rgba.save("/tmp/src_rgba.bmp").unwrap();
+              if let Ok(o) = image::open("/tmp/src_rgba.bmp") {
+                  try_save("roundtrip_rgba32", &o);
+              }
+              // 24-bit RGB BMP roundtrip
+              let rgb = RgbImage::from_pixel(207, 90, Rgb([200,100,50]));
+              rgb.save("/tmp/src_rgb24.bmp").unwrap();
+              if let Ok(o) = image::open("/tmp/src_rgb24.bmp") {
+                  try_save("roundtrip_rgb24", &o);
+              }
+
+              // 3) resize_exact 后存 BMP（批量路径）
+              let img5 = DynamicImage::ImageRgba8(RgbaImage::from_pixel(207, 90, Rgba([200,100,50,255])));
+              let r = img5.resize_exact(100, 43, image::imageops::FilterType::Lanczos3);
+              try_save("resize_rgba", &r);
+              // 4) resize（等比，缩略图路径）后存 BMP
+              let img6 = DynamicImage::ImageRgba8(RgbaImage::from_pixel(207, 90, Rgba([200,100,50,255])));
+              let r2 = img6.resize(200, u32::MAX, image::imageops::FilterType::Triangle);
+              try_save("resize_ratio_rgba", &r2);
+              // 5) crop 后存 BMP
+              let img7 = DynamicImage::ImageRgba8(RgbaImage::from_pixel(207, 90, Rgba([200,100,50,255])));
+              let c = img7.crop_imm(10, 10, 100, 50);
+              try_save("crop_rgba", &c);
+              // 6) rotate90 后存 BMP
+              let img8 = DynamicImage::ImageRgba8(RgbaImage::from_pixel(207, 90, Rgba([200,100,50,255])));
+              try_save("rotate_rgba", &img8.rotate90());
+              // 7) fliph 后存 BMP
+              let img9 = DynamicImage::ImageRgba8(RgbaImage::from_pixel(207, 90, Rgba([200,100,50,255])));
+              try_save("flip_rgba", &img9.fliph());
+
+              println!("ALL DONE");
+          }
+          EOF
+          cd /tmp/bmprepro && cargo run --quiet 2>&1 || true
