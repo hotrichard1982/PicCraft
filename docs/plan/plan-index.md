@@ -23,3 +23,4 @@
 | WORK-004-03 | [Tauri macOS 打包配置](WORK-004-03-tauri-macos-bundle-config.md) | PLAN-004 | ✅ 已验收 |
 | WORK-004-04 | [CI macOS 双架构构建](WORK-004-04-ci-macos-double-arch.md) | PLAN-004 | ✅ 已验收 |
 | WORK-004-05 | [发布文档与 Gatekeeper 指南](WORK-004-05-docs-gatekeeper-release.md) | PLAN-004 | ✅ 已验收 |
+| PLAN-005 | [macOS 选择目录崩溃修复](PLAN-005-macos-crash-fix.md) | BUG-002 | 🚧 进行中 |

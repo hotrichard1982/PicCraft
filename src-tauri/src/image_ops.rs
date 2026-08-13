@@ -281,7 +281,12 @@ pub fn save_image(
             }
         }
         "webp" => { img.save(save_path).map_err(|e| format!("WebP 保存失败: {e}"))?; }
-        "bmp"  => { img.save(save_path).map_err(|e| format!("BMP 保存失败: {e}"))?; }
+        "bmp"  => {
+            // BMP encoder 对 color 与 buffer 长度严格断言（BUG-002 崩溃防御）：
+            // 显式转 RGB 构造干净 buffer，消除不一致断言路径
+            let rgb = img.to_rgb8();
+            rgb.save(save_path).map_err(|e| format!("BMP 保存失败: {e}"))?;
+        }
         _ => return Err(format!("不支持的格式: {format}")),
     }
     let file_size = std::fs::metadata(save_path)
@@ -497,7 +502,12 @@ fn process_single_batch(
     match ext.as_str() {
         "png" => { resized.save(output).map_err(|e| format!("PNG 保存失败: {e}"))?; }
         "webp" => { resized.save(output).map_err(|e| format!("WebP 保存失败: {e}"))?; }
-        "bmp" => { resized.save(output).map_err(|e| format!("BMP 保存失败: {e}"))?; }
+        "bmp" => {
+            // BMP encoder 对 color 与 buffer 长度严格断言（BUG-002 崩溃防御）：
+            // 显式转 RGB 构造干净 buffer，消除不一致断言路径
+            let rgb = resized.to_rgb8();
+            rgb.save(output).map_err(|e| format!("BMP 保存失败: {e}"))?;
+        }
         _ => {
             let q = quality.clamp(1, 100);
             let rgb = resized.to_rgb8();
@@ -672,7 +682,15 @@ fn is_sensitive_macos_path(path: &str) -> bool {
 }
 
 fn save_to_temp(img: &DynamicImage, path: &PathBuf) -> Result<(), String> {
-    img.save(path).map_err(|e| format!("保存失败: {e}"))
+    // BMP encoder 对 color 与 buffer 长度严格断言（BUG-002 崩溃防御）：
+    // 显式转 RGB 构造干净 buffer，消除任何 DynamicImage 内部状态不一致的可能
+    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("bmp")) {
+        img.to_rgb8()
+            .save(path)
+            .map_err(|e| format!("保存失败: {e}"))
+    } else {
+        img.save(path).map_err(|e| format!("保存失败: {e}"))
+    }
 }
 
 fn png_colors(quality: u8) -> u32 {
@@ -1572,6 +1590,53 @@ mod tests {
             assert!(result.file_size > 0);
             assert!(!src.exists(), "保存成功后临时文件应被清理");
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_save_bmp_rgba_source_ok() {
+        // 防御性回归（BUG-002 崩溃防御）：BMP encoder 对 color 与 buffer 长度严格断言
+        // （expected 55890 got 74520），RGBA 源保存 BMP 必须显式转 RGB 后成功，
+        // 产物可重新打开且尺寸一致
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let dir = test_work_dir("save_bmp_rgba");
+        let rgba = image::RgbaImage::from_pixel(207, 90, image::Rgba([200, 100, 50, 128]));
+        let src = dir.join("rgba_src.png");
+        rgba.save(&src).expect("RGBA 测试图创建失败");
+        let out = dir.join("out.bmp");
+        let result = save_image(
+            src.to_string_lossy().to_string(),
+            out.to_string_lossy().to_string(),
+            "bmp".to_string(),
+            80,
+        )
+        .unwrap();
+        assert!(out.exists(), "BMP 输出文件应存在");
+        assert!(result.file_size > 0);
+        let opened = image::open(&out).expect("BMP 产物应可重新打开");
+        assert_eq!((opened.width(), opened.height()), (207, 90), "尺寸应保持");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_save_to_temp_bmp_rgba_ok() {
+        // 防御性回归：crop/resize/transform 的临时保存链（save_to_temp）对 RGBA 源
+        // 保存 BMP 必须成功（显式转 RGB，杜绝 BMP encoder 断言路径）
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let dir = test_work_dir("save_temp_bmp_rgba");
+        let rgba = image::RgbaImage::from_pixel(207, 90, image::Rgba([200, 100, 50, 128]));
+        let src = dir.join("rgba_src.bmp");
+        rgba.save(&src).expect("RGBA BMP 测试图创建失败");
+        let img = image::open(&src).expect("测试图应可打开");
+        let temp = temp_file_path(&src.to_string_lossy(), "transformed").unwrap();
+        save_to_temp(&img, &temp).unwrap();
+        assert!(temp.exists(), "临时文件应存在");
+        let opened = image::open(&temp).expect("临时 BMP 产物应可重新打开");
+        assert_eq!((opened.width(), opened.height()), (207, 90));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
