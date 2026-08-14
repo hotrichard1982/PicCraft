@@ -899,6 +899,19 @@ fn make_jpeg_thumbnail_fast(path: &Path, max_width: u32) -> Result<Vec<u8>, Stri
         .map_err(|e| format!("JPEG scale 设置失败: {e}"))?;
     let pixels = decoder.decode().map_err(|e| format!("JPEG 解码失败: {e}"))?;
 
+    // jpeg-decoder 对 CMYK 等色彩空间可能输出 4 字节/像素（RGBA）的数据，
+    // 而 RgbImage::from_raw 的长度检查是宽松的（不小于即放行），
+    // 直接包装会让 Rgb8 图像持有 RGBA 缓冲区，后续 PNG 编码触发断言 panic（BUG-002）。
+    // 长度不匹配时走整图解码兜底：image::open 能正确处理 CMYK → RGB 转换。
+    let expected_rgb_len = (decoded_w as usize) * (decoded_h as usize) * 3;
+    if pixels.len() != expected_rgb_len {
+        log::warn!(
+            "[thumb] JPEG fast path 输出非 RGB 像素（{}/px），回退整图解码: {path:?}",
+            pixels.len() / (decoded_w as usize).max(1) / (decoded_h as usize).max(1)
+        );
+        return make_thumbnail_fallback(path, max_width);
+    }
+
     let img_buffer = image::RgbImage::from_raw(decoded_w as u32, decoded_h as u32, pixels)
         .ok_or("JPEG 解码像素数据格式异常")?;
 
@@ -1400,6 +1413,139 @@ mod tests {
         assert!(unsupported.to_string_lossy().ends_with(".png"));
         let jpeg = temp_file_path(r"D:\Pictures\photo.jpeg", "t").unwrap();
         assert!(jpeg.to_string_lossy().ends_with(".jpeg"));
+    }
+
+    // ── BUG-002 复现枚举：macOS 选目录崩溃（image 编码断言）──
+
+    // -- BUG-002 回归：CMYK JPEG 缩略图不崩溃 --
+
+    /// 207x90 CMYK JPEG（PIL 生成），BUG-002 回归测试用
+    const CMYK_JPEG_207x90_B64: &str = concat!(
+        "/9j/7gAOQWRvYmUAZAAAAAAA/9sAQwAIBgYHBgUIBwcHCQkICgwUDQwLCwwZEhMPFB0aHx4dGhwcICQuJyAiLCMcHCg3KSwwMTQ0",
+        "NB8nOT04MjwuMzQy/8AAFAgAWgDPBEMRAE0RAFkRAEsRAP/EAB8AAAEFAQEBAQEBAAAAAAAAAAABAgMEBQYHCAkKC//EALUQAAIB",
+        "AwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZH",
+        "SElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV",
+        "1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+v/aAA4EQwBNAFkASwAAPwD3+vf69/r3+iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+        "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+        "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+        "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+        "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+        "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+        "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+        "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+        "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+        "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+        "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+        "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+        "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+        "iiiiiiiiiv/Z",
+    );
+
+
+    #[test]
+    fn test_bug002_cmyk_jpeg_thumbnail_no_panic() {
+        use base64::Engine;
+        let _guard = TEMP_FILE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let dir = test_work_dir("bug002_cmyk");
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(CMYK_JPEG_207x90_B64)
+            .expect("内嵌 CMYK JPEG base64 解码失败");
+        let src = dir.join("cmyk.jpg");
+        std::fs::write(&src, &raw).unwrap();
+
+        // 修复前：RGBA 数据被 Rgb8 放行 → PNG 编码断言 panic（image encoder.rs:115）
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            make_thumbnail(src.to_string_lossy().to_string(), 207)
+        }));
+        assert!(r.is_ok(), "CMYK JPEG 缩略图不应 panic（BUG-002）");
+        let b64 = r.unwrap().expect("CMYK JPEG 缩略图应成功");
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(b64).expect("缩略图 base64 解码失败");
+        assert_eq!(png[..8], [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a], "输出应为 PNG");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_bug002_repro_enum() {
+        use image::{Luma, LumaA, Rgb, Rgba};
+        let dir = test_work_dir("bug002_repro");
+        let mut panicked: Vec<String> = Vec::new();
+        let mut checked: Vec<String> = Vec::new();
+
+        macro_rules! try_thumb {
+            ($name:expr) => {{
+                let p = dir.join($name);
+                let r = std::panic::catch_unwind(|| {
+                    let _ = make_thumbnail(p.to_string_lossy().to_string(), 207);
+                });
+                checked.push($name.to_string());
+                if r.is_err() {
+                    panicked.push($name.to_string());
+                }
+            }};
+        }
+
+        // JPEG fast path：scale 场景（414x180 → max_width 207 → 目标 207x90）
+        let j = dir.join("j_414x180.jpg");
+        image::RgbImage::from_pixel(414, 180, Rgb([200, 100, 50])).save(&j).unwrap();
+        try_thumb!("j_414x180.jpg");
+        let j2 = dir.join("j_2000x900.jpg");
+        image::RgbImage::from_pixel(2000, 900, Rgb([10, 20, 30])).save(&j2).unwrap();
+        try_thumb!("j_2000x900.jpg");
+        let j3 = dir.join("j_odd_413x181.jpg");
+        image::RgbImage::from_pixel(413, 181, Rgb([1, 2, 3])).save(&j3).unwrap();
+        try_thumb!("j_odd_413x181.jpg");
+
+        // PNG 各 color type（fallback）
+        let p_rgb = dir.join("p_rgb.png");
+        image::RgbImage::from_pixel(207, 90, Rgb([1, 2, 3])).save(&p_rgb).unwrap();
+        try_thumb!("p_rgb.png");
+        let p_rgba = dir.join("p_rgba.png");
+        image::RgbaImage::from_pixel(207, 90, Rgba([1, 2, 3, 255])).save(&p_rgba).unwrap();
+        try_thumb!("p_rgba.png");
+        let p_l = dir.join("p_l.png");
+        image::GrayImage::from_pixel(207, 90, Luma([128])).save(&p_l).unwrap();
+        try_thumb!("p_l.png");
+        let p_la = dir.join("p_la.png");
+        image::GrayAlphaImage::from_pixel(207, 90, LumaA([128, 255])).save(&p_la).unwrap();
+        try_thumb!("p_la.png");
+        let p_l16 = dir.join("p_l16.png");
+        image::ImageBuffer::from_pixel(207, 90, Luma([256u16])).save(&p_l16).unwrap();
+        try_thumb!("p_l16.png");
+        let p_rgb16 = dir.join("p_rgb16.png");
+        image::ImageBuffer::from_pixel(207, 90, Rgb([256u16, 512, 768])).save(&p_rgb16).unwrap();
+        try_thumb!("p_rgb16.png");
+        let p_rgba16 = dir.join("p_rgba16.png");
+        image::ImageBuffer::from_pixel(207, 90, Rgba([256u16, 512, 768, 65535]))
+            .save(&p_rgba16)
+            .unwrap();
+        try_thumb!("p_rgba16.png");
+
+        // GIF / BMP / WebP / TIFF（fallback）
+        let g = dir.join("g.gif");
+        image::RgbImage::from_pixel(207, 90, Rgb([1, 2, 3])).save(&g).unwrap();
+        try_thumb!("g.gif");
+        let b = dir.join("b.bmp");
+        image::RgbaImage::from_pixel(207, 90, Rgba([1, 2, 3, 255])).save(&b).unwrap();
+        try_thumb!("b.bmp");
+        let w = dir.join("w.webp");
+        match image::RgbaImage::from_pixel(207, 90, Rgba([1, 2, 3, 255])).save(&w) {
+            Ok(_) => try_thumb!("w.webp"),
+            Err(_) => checked.push("w.webp (encode unsupported)".into()),
+        }
+        let t = dir.join("t.tiff");
+        match image::RgbaImage::from_pixel(207, 90, Rgba([1, 2, 3, 255])).save(&t) {
+            Ok(_) => try_thumb!("t.tiff"),
+            Err(_) => checked.push("t.tiff (encode unsupported)".into()),
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            panicked.is_empty(),
+            "以下图片触发编码断言 panic（BUG-002）：{panicked:?}；已检查：{checked:?}"
+        );
     }
 
     // ── 裁剪 crop ──

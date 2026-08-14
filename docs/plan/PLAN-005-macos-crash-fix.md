@@ -1,11 +1,11 @@
 ---
 id: PLAN-005
 title: macOS 选择目录崩溃修复实施计划
-status: implementing
+status: completed
 source: BUG-002
 topics: [macos, crash, webview]
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-08-14
 ---
 
 # PLAN-005 macOS 选择目录崩溃修复实施计划

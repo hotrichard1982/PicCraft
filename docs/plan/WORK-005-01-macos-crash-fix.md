@@ -46,3 +46,35 @@ assertion `left == right` failed: Invalid buffer length: expected 55890 got 7452
 
 - 防御性修复不改变正常输入行为（RGBA→BMP 显式转 RGB 输出，与 image 自动转换等价）；回滚 = revert 提交。
 - 若真机仍复现：需要异常样例图 + 新 `piccarft.log`，或升级 image crate 观察上游修复。
+
+## 回执（2026-08-13）
+
+### 取证结果
+
+朋友终端复现，panic 消息定位到 **项目自身图片编码链路**（非 wry/tauri）：
+
+```
+image-0.25.10/src/io/encoder.rs:115:17:
+Invalid buffer length: expected 55890 got 74520 for 207x90 image
+```
+
+### 根因
+
+CMYK JPEG → `jpeg-decoder 0.3.2` 解码输出 RGBA（4 字节/像素）→ `image::RgbImage::from_raw` 宽松长度检查（`min_len <= len`）放行 → Rgb8 图像持有 RGBA 缓冲区 → `write_to(Png)` 断言 panic → 主线程 FFI 边界 abort。Windows 同样受影响。
+
+### 实施
+
+1. **修复（路径 B 缩小版）**：`make_jpeg_thumbnail_fast` 在 `RgbImage::from_raw` 前显式校验 `pixels.len() == w*h*3`；非 RGB 输出回退 `make_thumbnail_fallback`（`image::open` 正确处理 CMYK）。
+2. **依赖升级（用户要求）**：tauri 2.11.2 → 2.11.5（wry 保持 0.55.1，不直接修复本 bug）。
+
+### 测试结果
+
+- 回归测试 `test_bug002_cmyk_jpeg_thumbnail_no_panic`：内嵌 CMYK JPEG，修复前复现 panic，修复后通过。
+- Rust 全量：76/76 通过（含 tauri 2.11.5 升级后）。
+- 前端全量：115/115 通过；`pnpm lint`、`pnpm build` 通过。
+- 待办：新 DMG 真机复验（选 `~/Documents` 不再崩溃）。
+
+### 风险与回滚
+
+- 升级 tauri 2.11.5 已锁定于 Cargo.lock，如真机异常可回退 2.11.2（`cargo update -p tauri --precise 2.11.2`）。
+- 修复仅影响 CMYK 等非 RGB JPEG 的缩略图路径（回退整图解码，性能略降但正确），常规 JPEG 不受影响。

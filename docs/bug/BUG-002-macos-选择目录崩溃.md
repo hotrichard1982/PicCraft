@@ -4,7 +4,7 @@ title: macOS 选择目录（Documents）后应用崩溃
 status: resolved
 topics: [macos, crash, webview, image]
 created: 2026-08-12
-updated: 2026-08-13
+updated: 2026-08-14
 ---
 
 # BUG-002 macOS 选择目录（Documents）后应用崩溃
@@ -47,29 +47,46 @@ panic 链：panic_with_hook → panic_nounwind_fmt → panic_cannot_unwind → a
 
 ## 根因分析
 
-Rust panic 发生在 **WebKit 自定义协议（URL scheme）任务回调** `wry::webview::url_scheme_handler::start_task`，`panic_cannot_unwind` 表示 panic 位于 `extern "C"` FFI 边界（WebKit 调用 Rust 的入口），直接 abort。
+**结论（2026-08-12 已定案，朋友终端复现拿到 panic 消息）：**
 
-代码排查结论：
+```
+thread 'main' panicked at image-0.25.10/src/io/encoder.rs:115:17:
+assertion `left == right` failed: Invalid buffer length: expected 55890 got 74520 for 207x90 image
+```
 
-- 缩略图走 base64 IPC（`make_thumbnail`），不经过 WebKit 协议，安全。
-- 大图显示（`QueuePanel` / `FullscreenViewer` / `CropCanvas`）经 `convertFileSrc` → `asset://` 协议 → 正是 `start_task` 处理路径。
-- `tauri` asset handler 防御完整（403/404/HTTP Range 均有保护），非 panic 源。
-- `wry 0.55.1` `start_task` 内多处 `unwrap()`：`WEBVIEW_STATE.read()`（锁中毒可 panic）、`request.URL().unwrap()`（WebKit 任务异常/取消时可为 nil）、`url.absoluteString().unwrap()`、`mime.to_str().unwrap()`（响应头非法字节）。
-- `wry 0.56.0` changelog 无相关修复；tauri 2.11.2（最新 2.11.5）。
+**这不是 wry/tauri 的 bug，而是项目自身图片编码链路的颜色类型错配**，完整链路：
 
-主要候选：内存压力或任务取消场景下 `request.URL()` 返回 nil 触发 unwrap panic；`~/Documents` 图片较多、加载压力大是触发器。
+1. 缩略图 `make_thumbnail` 对 JPEG 走快速路径 `make_jpeg_thumbnail_fast`（jpeg-decoder 0.3.2）。
+2. `jpeg-decoder` 对 **CMYK 色彩空间 JPEG** 解码输出 **4 字节/像素（RGBA）**数据。
+3. `image::RgbImage::from_raw` 的长度检查是**宽松的**（`min_len <= len` 即放行，非精确相等），RGBA 数据（74520）被当成 RGB（55890）包装成功——**Rgb8 图像持有 RGBA 缓冲区，不变量破坏**。
+4. 后续 `write_to(Png)` 编码：PNG 编码器按 `Rgb8` 计算期望长度 55890，实际缓冲区 74520 → **断言 panic**。
+5. `make_thumbnail` 是同步 command，tauri v2 在主线程执行；panic 沿 `start_task`（extern "C" FFI 边界）无法 unwind → **SIGABRT**。
+
+选 `~/Documents` 触发：Documents 内含 CMYK JPEG 图片（常见于设计稿、打印素材），缩略图加载即崩溃。**Windows 同样受影响**（任何含 CMYK JPEG 的目录）。
+
+此前怀疑的 wry `start_task` 内部 unwrap、asset 协议、内存压力均为表象——panic 确实发生在 `start_task` 调用链上，但源头是项目代码传入的图片数据。
+
+### 修复
+
+`src-tauri/src/image_ops.rs` `make_jpeg_thumbnail_fast`：`RgbImage::from_raw` 前**显式校验像素长度** `pixels.len() == w*h*3`；不匹配（CMYK 等非 RGB 输出）时**回退整图解码** `make_thumbnail_fallback`（`image::open` 能正确处理 CMYK → RGB 转换）。
+
+另按用户要求升级 `tauri 2.11.2 → 2.11.5`（不直接修复本 bug，作为常规依赖维护）。
+
+### 回归测试
+
+`test_bug002_cmyk_jpeg_thumbnail_no_panic`：内嵌 207x90 CMYK JPEG（PIL 生成），断言 `make_thumbnail` 不 panic 且输出合法 PNG。修复前该测试在 `image encoder.rs:115` 复现崩溃（与真机一致）。
 
 ## 影响与风险
 
-- 严重程度：高（真机必现崩溃，阻塞 macOS 可用性验收）。
+- 严重程度：高（真机必现崩溃，阻塞 macOS 可用性验收；Windows 同样受影响）。
 - 数据影响：崩溃前无写操作，无数据损坏风险。
-- 修复风险：低—中；可能涉及依赖升级（tauri/wry）或前端图片加载方式调整，需回归 Windows 侧全量测试。
+- 修复风险：低；仅 `make_jpeg_thumbnail_fast` 增加长度校验与回退，不涉及架构/依赖/权限变更。
 
 ## 目标
 
-1. 定位 `start_task` 内 panic 精确行号（Rust panic message）。
-2. 修复崩溃：优先升级 tauri/wry；若证据指向 asset 协议路径，将大图加载改为后端 base64 读取，彻底绕开崩溃路径。
-3. macOS 真机复验通过后收口。
+1. ✅ 定位 panic 精确行号（朋友终端复现，`image encoder.rs:115`）。
+2. ✅ 修复崩溃：`make_jpeg_thumbnail_fast` 显式校验像素长度，非 RGB 输出回退整图解码。
+3. ⏳ macOS 真机复验（新 DMG 待朋友确认）。
 
 ## 根因更正（2026-08-13，主 Agent 取证完成）
 
