@@ -88,27 +88,15 @@ assertion `left == right` failed: Invalid buffer length: expected 55890 got 7452
 2. ✅ 修复崩溃：`make_jpeg_thumbnail_fast` 显式校验像素长度，非 RGB 输出回退整图解码。
 3. ⏳ macOS 真机复验（新 DMG 待朋友确认）。
 
-## 根因更正（2026-08-13，主 Agent 取证完成）
+## 根因定案（2026-08-14，本地复现）
 
-上述「主要候选」（wry unwrap / TCC / 内存）基于 `.ips` 推断，**方向错误**。朋友提供了 `piccarft.log`（应用 stdout/stderr），含**决定性 Rust panic 证据**：
+朋友提供 `piccarft.log` 后先疑为 BMP 编码断言（2026-08-13 防御性修复，见下）；**2026-08-14 本地精确复现，确认真根因为 CMYK JPEG → 缩略图 PNG 编码断言**（见上文「根因分析」，复现证据与真机日志逐字节一致）：
 
 ```
-thread 'main' panicked at .../image-0.25.10/src/io/encoder.rs:115:17:
-assertion `left == right` failed: Invalid buffer length: expected 55890 got 74520 for 207x90 image
+image-0.25.10/src/io/encoder.rs:115:17:
+Invalid buffer length: expected 55890 got 74520 for 207x90 image
 ```
 
-### 真根因
-
-- **image-0.25.10 BMP encoder 的 buffer 长度断言**：`expected 55890 = 207×90×3（Rgb8）`，`got 74520 = 207×90×4（RGBA）`——**BMP 编码时 color 类型与 buffer 长度不匹配**。
-- 崩溃发生在主线程（macOS 上 Tauri IPC/asset 经 WKWebView 自定义 scheme handler `start_task` 执行），Rust panic 跨 FFI 边界 → `panic_cannot_unwind` → SIGABRT。`.ips` 的 `start_task` 栈是 panic 传播路径，**不是根因**；TCC/内存数据是崩溃前的环境背景（浏览大目录的固有压力），**与断言无因果**。
-- 项目正常代码路径（save_image / resize / batch / save_to_temp 的 BMP 分支均为 `img.save()`，DynamicImage 自洽）**无法产生该断言**；复现矩阵（Windows x64、macOS arm64、macOS x64/Rosetta、全 color 输入、resize 尺寸矩阵、真实 24/32/8-bit 调色板 BMP 文件）**全部通过**——指向 image 0.25.10 在**特定输入**（疑似损坏/异常 JPEG 或 BMP）下构造出 color 与 buffer 不一致的 `DynamicImage`（内部状态异常/UB），仅在该输入 + 该保存路径下触发。
-
-### 修复（已实施，防御性）
-
-- `src-tauri/src/image_ops.rs` 三处 BMP 编码路径全部**显式 `to_rgb8()` 后再保存**（`save_image` bmp 分支、`process_single_batch` bmp 分支、`save_to_temp`），从根上消除 color/buffer 不一致的断言路径（即使 img 内部状态异常，也重新构造干净 RGB buffer，不 panic）。
-- 新增 2 个回归测试（RGBA 源 → BMP 保存 roundtrip；save_to_temp BMP 路径），Rust 全量 **74 passed**。
-- 修复前后各平台行为一致（防御性修复，无 RED 复现），回执如实记录验证边界。
-
-### 后续
-
-- 新 DMG 构建后请朋友真机复测 `~/Documents` 场景；若仍复现，提供新 `piccarft.log` 继续取证（可能需要损坏样例图）。
+- **复现**：PIL 生成 207x90 CMYK JPEG → `make_thumbnail(path, 207)` → 本地 catch_unwind 捕获**相同断言 panic**（Windows 亦可复现）。
+- **为什么 2d3bebb 的复现矩阵全过**：image crate 无法编码 CMYK JPEG，矩阵未覆盖该输入；且 BMP 编码只出现在保存操作（选文件夹不触发），BMP 路径与崩溃场景无关。
+- **BMP 防御修复保留**（2d3bebb，`save_image`/`process_single_batch`/`save_to_temp` 三处 BMP 分支显式 `to_rgb8()`）：无害的附加防御，与 CMYK 修复互补；其 2 个回归测试保留。
