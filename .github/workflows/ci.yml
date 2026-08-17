@@ -62,9 +62,11 @@ jobs:
     # macOS 质量门禁 + 双架构 DMG 构建（WORK-004-04）
     # arm64 = macos-14 原生构建；x64 = macos-14 交叉编译 x86_64-apple-darwin
     # （返工：macos-13 Intel 公共 runner 排队拥堵不可控，改同机交叉编译；macOS 系统框架跨 arch 可用，无需额外 env）
-    # 不签名、不公证、不创建 Release、不打 tag、无 secrets
+    # tag 发布时仅上传已经校验通过的 DMG；普通 push/PR 保留 Artifact，不发布。
     name: macOS 质量门禁 (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -171,6 +173,24 @@ jobs:
           print("Info.plist 断言通过")
           EOF
           hdiutil detach "$MOUNT"
+
+      - name: 上传 DMG 到正式 Release（仅日期 RC tag）
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]{8}RC[0-9]{2}$ ]] || { echo "跳过非日期 RC tag：$TAG"; exit 0; }
+          for attempt in {1..30}; do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" PicCraft_*.dmg --clobber
+              exit 0
+            fi
+            echo "等待发布 $TAG 创建（$attempt/30）"
+            sleep 10
+          done
+          echo "::error::等待发布 $TAG 创建超时"
+          exit 1
 
       - name: 上传 DMG Artifact
         uses: actions/upload-artifact@v4

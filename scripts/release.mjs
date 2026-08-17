@@ -125,7 +125,7 @@ ${buildLog}
 // 用 gh CLI 创建 release
 const uploadArgs = uploads.map((f) => `"${f}"`).join(" ")
 try {
-  run(`gh release create ${tag} ${uploadArgs} --prerelease --title "${tag}" --notes "${releaseNotes.replace(/"/g, '\\"')}"`)
+  run(`gh release create ${tag} ${uploadArgs} --title "${tag}" --notes "${releaseNotes.replace(/"/g, '\\"')}"`)
   console.log("✅ Release 创建成功！")
 } catch (e) {
   console.error("❌ Release 创建失败，请手动上传：")

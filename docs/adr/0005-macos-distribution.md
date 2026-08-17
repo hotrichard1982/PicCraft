@@ -1,10 +1,10 @@
 ---
 id: ADR-0005
-title: macOS 平台适配与分发：未签名双架构 DMG + CI Artifact
+title: macOS 平台适配与分发：未签名双架构 DMG + CI 自动上传
 status: 已接受
 topics: [macos, release, distribution, dmg, gatekeeper]
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-08-17
 ---
 
 # ADR-0005: macOS 平台适配与分发
@@ -20,8 +20,8 @@ PicCraft 需要支持 macOS（Apple Silicon arm64 + Intel x64，最低 macOS 12 
 ## 决策
 
 1. **不签名、不公证、不上架 App Store**：维持现状能力边界，不注册开发者账号。
-2. **分别构建 arm64 与 x64 两个未签名 DMG**，GitHub Actions 构建后保存为 CI Artifact，不自动发布。
-3. **发布形态**：朋友真机确认后，手动创建 `v0.3.0` Pre-release（关联两个 DMG Artifact）。真机未覆盖的架构在发布说明中**透明标注「仅自动化验证」**。
+2. **分别构建 arm64 与 x64 两个未签名 DMG**：日期 RC tag 的 GitHub Actions 在每个 DMG 完成架构与 Info.plist 校验后，自动上传到同名 GitHub 正式 Release；同时保留 CI Artifact 供排障与备用下载。
+3. **发布形态**：Windows 发布脚本创建日期 RC tag 对应的正式 Release；macOS CI 自动附加两个 DMG。真机未覆盖的架构在发布说明中**透明标注「仅自动化验证」**。
 4. **Gatekeeper 文档只提供 Finder 右键「打开」方式**；不提供关闭 Gatekeeper（`sudo spctl --master-disable`）或任何全局降低安全性的命令。
 5. macOS 文件关联**不动态注册/取消**：由 Tauri 打包期的 `CFBundleDocumentTypes`（UTI 静态声明）完成，用户按设置页教程在 Finder「显示简介 → 打开方式」中把默认应用设为 PicCraft。
 
