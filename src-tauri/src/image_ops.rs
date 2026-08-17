@@ -85,7 +85,9 @@ pub struct SaveResult {
     pub file_size: u64,
 }
 
-/// 读取图片信息（不加载像素数据，仅元信息）
+/// 读取图片信息（不加载像素数据，仅元信息）。
+/// 格式按文件内容嗅探（BUG-004）：扩展名可能是假的（如 .png 实为 JPEG），
+/// 按扩展名解码会报 Invalid PNG signature。
 #[tauri::command]
 pub fn get_image_info(path: String) -> Result<ImageInfo, String> {
     if is_sensitive_path(&path) {
@@ -94,12 +96,16 @@ pub fn get_image_info(path: String) -> Result<ImageInfo, String> {
     let path = Path::new(&path);
     let metadata = std::fs::metadata(path).map_err(|e| format!("读取文件失败: {e}"))?;
     let file_size = metadata.len();
-    let (width, height) = image::image_dimensions(path)
+    let reader = image::ImageReader::open(path)
+        .and_then(|r| r.with_guessed_format())
+        .map_err(|e| format!("读取图片失败: {e}"))?;
+    let format = reader
+        .format()
+        .map(|f| format!("{f:?}"))
+        .unwrap_or_else(|| "Unknown".to_string());
+    let (width, height) = reader
+        .into_dimensions()
         .map_err(|e| format!("读取图片尺寸失败: {e}"))?;
-    let mut format = String::from("Unknown");
-    if let Some(f) = image::ImageFormat::from_path(path).ok() {
-        format = format!("{:?}", f);
-    }
     Ok(ImageInfo {
         path: path.to_string_lossy().to_string(),
         width,
@@ -1365,6 +1371,37 @@ mod tests {
 
     fn img_dims(path: &Path) -> (u32, u32) {
         image::image_dimensions(path).expect("读取测试图片尺寸失败")
+    }
+
+    // ─── BUG-004：假扩展名图片应按内容识别 ───
+
+    #[test]
+    fn test_get_image_info_mismatched_extension() {
+        let dir = test_work_dir("fake_ext");
+        // 内容是 JPEG，扩展名是 .png（微信小程序码等常见假 PNG）
+        let jpeg_path = make_test_image(&dir, "real_jpeg", 120, 80, "jpg");
+        let fake_png = dir.join("fake.png");
+        std::fs::copy(&jpeg_path, &fake_png).expect("复制测试图片失败");
+
+        let info = get_image_info(fake_png.to_string_lossy().to_string())
+            .expect("假扩展名图片应能读取信息");
+        assert_eq!((info.width, info.height), (120, 80), "尺寸应按真实内容读取");
+        assert_eq!(info.format, "Jpeg", "格式应按内容嗅探为 Jpeg");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_get_image_info_real_png_not_regressed() {
+        let dir = test_work_dir("real_png");
+        let png_path = make_test_image(&dir, "real_png", 64, 48, "png");
+
+        let info = get_image_info(png_path.to_string_lossy().to_string())
+            .expect("真 PNG 应正常读取");
+        assert_eq!((info.width, info.height), (64, 48));
+        assert_eq!(info.format, "Png");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // ── 临时文件 ──

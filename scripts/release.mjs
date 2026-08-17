@@ -3,7 +3,7 @@
  *
  * 流程：
  *   1. 验证 git 工作区干净
- *   2. 生成 tag 名（vYYYYMMDD）
+ *   2. 生成 RC tag 名（vYYYYMMDDRCNN；同日递增）
  *   3. 编译 exe（调用 copy-dist.mjs）
  *   4. 创建 GitHub Release 并上传产物
  *
@@ -41,22 +41,22 @@ if (status) {
 }
 console.log("✅ 工作区干净")
 
-// ─── 2. 确定版本号 ───
-console.log("\n=== 2/5 确定版本号 ===")
+// ─── 2. 确定 RC 版本号 ───
+console.log("\n=== 2/5 确定 RC 版本号 ===")
 const now = new Date()
 const y = now.getFullYear()
 const m = String(now.getMonth() + 1).padStart(2, "0")
 const d = String(now.getDate()).padStart(2, "0")
-const tag = `v${y}${m}${d}`
-
-// 检查 tag 是否已存在
-const existingTags = runCapture("git tag --list").split("\n")
-if (existingTags.includes(tag)) {
-  console.log(`Tag ${tag} 已存在，使用 --force 覆盖？`)
-  console.log("使用现有 tag，跳过创建。")
-} else {
-  console.log(`Tag: ${tag}`)
-}
+const datePrefix = `v${y}${m}${d}RC`
+const existingTags = runCapture(`git tag --list "${datePrefix}*"`)
+  .split("\n")
+  .filter(Boolean)
+const nextRc = existingTags.reduce((highest, value) => {
+  const match = new RegExp(`^${datePrefix}(\\d{2})$`).exec(value)
+  return match ? Math.max(highest, Number(match[1])) : highest
+}, 0) + 1
+const tag = `${datePrefix}${String(nextRc).padStart(2, "0")}`
+console.log(`Tag: ${tag}`)
 
 // ─── 3. 编译 ───
 console.log("\n=== 3/5 编译 exe ===")
@@ -125,7 +125,7 @@ ${buildLog}
 // 用 gh CLI 创建 release
 const uploadArgs = uploads.map((f) => `"${f}"`).join(" ")
 try {
-  run(`gh release create ${tag} ${uploadArgs} --title "${tag}" --notes "${releaseNotes.replace(/"/g, '\\"')}"`)
+  run(`gh release create ${tag} ${uploadArgs} --prerelease --title "${tag}" --notes "${releaseNotes.replace(/"/g, '\\"')}"`)
   console.log("✅ Release 创建成功！")
 } catch (e) {
   console.error("❌ Release 创建失败，请手动上传：")

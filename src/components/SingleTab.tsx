@@ -13,10 +13,13 @@ import {
   editReducer,
   aspectHeightForWidth,
   aspectWidthForHeight,
+  currentEditSize,
+  canUndo,
+  canRedo,
   type ImageInfo,
 } from "@/lib/single-tab-state"
 import { getPlatform, matchSaveShortcut, saveShortcutHint } from "@/lib/platform"
-import { FolderOpen, RotateCcw, Save, Download, ListPlus } from "lucide-react"
+import { FolderOpen, Undo2, Redo2, RotateCcw, Save, Download, ListPlus } from "lucide-react"
 
 interface ImageResult {
   temp_path: string
@@ -34,7 +37,7 @@ const IMG_EXTS = ["jpg", "jpeg", "png", "webp", "bmp"]
 export function SingleTab() {
 
   const [img, dispatchImg] = useReducer(imageReducer, {
-    filePath: "", imageInfo: null, displayPath: null, tempPath: null, cropRect: null, hasImage: false, isPng: false,
+    filePath: "", imageInfo: null, displayPath: null, tempPath: null, cropRect: null, hasImage: false, isPng: false, history: [], redoStack: [],
   })
   const [edit, dispatchEdit] = useReducer(editReducer, {
     width: "800", height: "600", keepAspect: true, quality: "85",
@@ -108,10 +111,15 @@ export function SingleTab() {
       const th = parseInt(edit.height) || 600
 
       let finalW = tw, finalH = th
-      if (edit.keepAspect && img.imageInfo) {
-        const ratio = Math.min(tw / img.imageInfo.width, th / img.imageInfo.height)
-        finalW = Math.round(img.imageInfo.width * ratio)
-        finalH = Math.round(img.imageInfo.height * ratio)
+      const base = currentEditSize(img)
+      if (edit.keepAspect && base) {
+        const ratio = Math.min(tw / base.width, th / base.height)
+        finalW = Math.round(base.width * ratio)
+        finalH = Math.round(base.height * ratio)
+      }
+      if (base && finalW === base.width && finalH === base.height) {
+        setStatusText("尺寸未变化")
+        return
       }
 
       const result = await invoke<ImageResult>("resize_image", {
@@ -126,32 +134,41 @@ export function SingleTab() {
     } catch (e) {
       setStatusText(`缩放失败：${e}`)
     }
-  }, [img.filePath, img.tempPath, img.imageInfo, edit.width, edit.height, edit.keepAspect])
+  }, [img, edit.width, edit.height, edit.keepAspect])
 
-  // ─── Aspect Ratio ───
+  // ─── Aspect Ratio（基于当前编辑图尺寸，BUG-003）───
   const handleWidthChange = useCallback((value: string) => {
     dispatchEdit({ type: "setWidth", value })
-    if (edit.keepAspect && img.imageInfo) {
-      const h = aspectHeightForWidth(parseInt(value), img.imageInfo.width, img.imageInfo.height)
-      if (h !== null) dispatchEdit({ type: "setHeight", value: String(h) })
+    if (edit.keepAspect) {
+      const base = currentEditSize(img)
+      if (base) {
+        const h = aspectHeightForWidth(parseInt(value), base.width, base.height)
+        if (h !== null) dispatchEdit({ type: "setHeight", value: String(h) })
+      }
     }
-  }, [edit.keepAspect, img.imageInfo])
+  }, [edit.keepAspect, img])
 
   const handleHeightChange = useCallback((value: string) => {
     dispatchEdit({ type: "setHeight", value })
-    if (edit.keepAspect && img.imageInfo) {
-      const w = aspectWidthForHeight(parseInt(value), img.imageInfo.width, img.imageInfo.height)
-      if (w !== null) dispatchEdit({ type: "setWidth", value: String(w) })
+    if (edit.keepAspect) {
+      const base = currentEditSize(img)
+      if (base) {
+        const w = aspectWidthForHeight(parseInt(value), base.width, base.height)
+        if (w !== null) dispatchEdit({ type: "setWidth", value: String(w) })
+      }
     }
-  }, [edit.keepAspect, img.imageInfo])
+  }, [edit.keepAspect, img])
 
   const handleAspectToggle = useCallback((checked: boolean) => {
     dispatchEdit({ type: "setKeepAspect", value: checked })
-    if (checked && img.imageInfo) {
-      const h = aspectHeightForWidth(parseInt(edit.width), img.imageInfo.width, img.imageInfo.height)
-      if (h !== null) dispatchEdit({ type: "setHeight", value: String(h) })
+    if (checked) {
+      const base = currentEditSize(img)
+      if (base) {
+        const h = aspectHeightForWidth(parseInt(edit.width), base.width, base.height)
+        if (h !== null) dispatchEdit({ type: "setHeight", value: String(h) })
+      }
     }
-  }, [img.imageInfo, edit.width])
+  }, [img, edit.width])
 
   // ─── Save As ───
   const handleSaveAs = useCallback(async () => {
@@ -222,6 +239,29 @@ export function SingleTab() {
     }
   }, [img.filePath, img.imageInfo])
 
+  // ─── Undo / Redo（编辑历史）───
+  const handleUndo = useCallback(() => {
+    if (!canUndo(img)) return
+    dispatchImg({ type: "undoEdit" })
+    const history = img.history.slice(0, -1)
+    const last = history[history.length - 1]
+    const size = last
+      ? { width: last.width, height: last.height }
+      : (img.imageInfo ? { width: img.imageInfo.width, height: img.imageInfo.height } : null)
+    if (size) dispatchEdit({ type: "setSize", width: String(size.width), height: String(size.height) })
+    setStatusText("已撤销上一步")
+  }, [img])
+
+  const handleRedo = useCallback(() => {
+    if (!canRedo(img)) return
+    dispatchImg({ type: "redoEdit" })
+    const snapshot = img.redoStack[img.redoStack.length - 1]
+    if (snapshot) {
+      dispatchEdit({ type: "setSize", width: String(snapshot.width), height: String(snapshot.height) })
+    }
+    setStatusText("已重做")
+  }, [img])
+
   // ─── Enqueue & Open Next ───
   const handleEnqueueAndNext = useCallback(async () => {
     if (!img.filePath) return
@@ -268,15 +308,74 @@ export function SingleTab() {
         e.preventDefault()
         handleOverwrite()
       }
+
+      const target = e.target as HTMLElement | null
+      const isEditable = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target?.isContentEditable
+      if (isEditable) return
+
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && canUndo(img)) {
+        e.preventDefault()
+        handleUndo()
+      } else if (
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "z") ||
+        ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "y")
+      ) {
+        if (canRedo(img)) {
+          e.preventDefault()
+          handleRedo()
+        }
+      }
     }
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
-  }, [handleSaveAs, handleOverwrite])
+  }, [handleSaveAs, handleOverwrite, handleUndo, handleRedo, img])
+
+  // ─── 预览区顶部工具组：编辑历史按钮（撤销/重做/重置）───
+  const historyToolbar = (
+    <>
+      <button
+        type="button"
+        onClick={handleUndo}
+        disabled={!canUndo(img)}
+        aria-label="撤销"
+        className="group relative p-2 rounded-md hover:bg-accent transition-colors disabled:opacity-40 disabled:pointer-events-none"
+      >
+        <Undo2 className="size-4" />
+        <span className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 px-2 py-0.5 text-[10px] whitespace-nowrap rounded bg-foreground text-background opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          撤销
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={handleRedo}
+        disabled={!canRedo(img)}
+        aria-label="重做"
+        className="group relative p-2 rounded-md hover:bg-accent transition-colors disabled:opacity-40 disabled:pointer-events-none"
+      >
+        <Redo2 className="size-4" />
+        <span className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 px-2 py-0.5 text-[10px] whitespace-nowrap rounded bg-foreground text-background opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          重做
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={handleReset}
+        disabled={!img.hasImage}
+        aria-label="重置"
+        className="group relative p-2 rounded-md hover:bg-accent transition-colors disabled:opacity-40 disabled:pointer-events-none"
+      >
+        <RotateCcw className="size-4" />
+        <span className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 px-2 py-0.5 text-[10px] whitespace-nowrap rounded bg-foreground text-background opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          重置
+        </span>
+      </button>
+    </>
+  )
 
   return (
     <div className="flex h-full">
       {/* Canvas */}
-      <CropCanvas imagePath={img.displayPath} cropRect={img.cropRect}
+      <CropCanvas imagePath={img.displayPath} cropRect={img.cropRect} toolbarExtra={historyToolbar}
         onCropChange={(rect) => dispatchImg({ type: "setCropRect", rect })} onFileDrop={loadImage}
         onApplyTransform={async (params) => {
           const source = img.tempPath || img.filePath
@@ -408,14 +507,9 @@ export function SingleTab() {
 
           {/* Save */}
           <div className="space-y-2">
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" className="flex-1" disabled={!img.hasImage} onClick={handleReset}>
-                <RotateCcw className="size-3 mr-1" />重置
-              </Button>
-              <Button size="sm" className="flex-1" disabled={!img.tempPath} onClick={handleOverwrite}>
-                <Save className="size-3 mr-1" />覆盖原图
-              </Button>
-            </div>
+            <Button size="sm" className="w-full" disabled={!img.tempPath} onClick={handleOverwrite}>
+              <Save className="size-3 mr-1" />覆盖原图
+            </Button>
             <Button size="sm" variant="outline" className="w-full" disabled={!img.hasImage} onClick={handleSaveAs}>
               <Download className="size-3 mr-1" />另存为
             </Button>

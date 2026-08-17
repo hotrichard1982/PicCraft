@@ -25,3 +25,5 @@
 | WORK-004-05 | [发布文档与 Gatekeeper 指南](WORK-004-05-docs-gatekeeper-release.md) | PLAN-004 | ✅ 已验收 |
 | PLAN-005 | [macOS 选择目录崩溃修复](PLAN-005-macos-crash-fix.md) | BUG-002 | ✅ 已完成 |
 | WORK-005-01 | [崩溃取证与修复实施](WORK-005-01-macos-crash-fix.md) | PLAN-005 / BUG-002 | ✅ 已完成 |
+| PLAN-006 | [单图编辑比例修复与撤销、浏览地址栏](PLAN-006-单图编辑保持原图比例换算错误.md) | BUG-003 | ✅ 已完成 |
+| PLAN-007 | [假扩展名图片修复与预览区工具按钮组](PLAN-007-假扩展名图片加载失败.md) | BUG-004 | ✅ 已完成 |

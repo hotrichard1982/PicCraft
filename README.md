@@ -2,7 +2,7 @@
 
 模块化桌面图片处理工具 — 浏览、挑选、单张/批量编辑一体化工作流。
 
-**v0.3.0 (2026.08)** · Rust + Tauri v2 · React 19 · TypeScript · Tailwind CSS · Konva.js · 明暗双主题
+**v0.3.1 (2026.08)** · Rust + Tauri v2 · React 19 · TypeScript · Tailwind CSS · Konva.js · 明暗双主题
 
 **重庆三人众科技有限公司** | QQ: 7602069 | 邮箱: 7602069@qq.com | [官网](https://www.cq30.com/)
 
@@ -65,11 +65,11 @@
 
 ## macOS 支持
 
-PicCraft v0.3.0 起支持 macOS。以**未签名、未公证**的 DMG 分发，首次打开需按 Finder 右键「打开」方式操作（见 [macOS Gatekeeper 使用指南](docs/guide/macos-gatekeeper.md)）。
+PicCraft v0.3.1 起支持 macOS。以**未签名、未公证**的 DMG 分发，首次打开需按 Finder 右键「打开」方式操作（见 [macOS Gatekeeper 使用指南](docs/guide/macos-gatekeeper.md)）。
 
 | 项 | 说明 |
 |---|---|
-| 版本 | 0.3.0 |
+| 版本 | 0.3.1 |
 | 架构 | Apple Silicon（arm64）与 Intel（x64）双架构，分别发布独立 DMG |
 | 最低系统 | macOS 12 Monterey |
 | 支持格式 | JPG / JPEG、PNG、WebP、BMP |
@@ -126,7 +126,7 @@ npx tauri build
 
 Tauri 2 CLI 自动查找并合并平台配置 `src-tauri/tauri.macos.conf.json`（identifier `com.cq30.piccarft`、DMG 打包目标、文件关联 UTI、最低 macOS 12），无需额外参数。
 
-输出：`src-tauri/target/release/bundle/dmg/` — DMG 安装镜像。CI 中按架构重命名为 `PicCraft_0.3.0_arm64.dmg` / `PicCraft_0.3.0_x64.dmg`，保存为 Artifact（`piccarft-dmg-arm64` / `piccarft-dmg-x64`）。
+输出：`src-tauri/target/release/bundle/dmg/` — DMG 安装镜像。CI 中按架构重命名为 `PicCraft_0.3.1_arm64.dmg` / `PicCraft_0.3.1_x64.dmg`，保存为 Artifact（`piccarft-dmg-arm64` / `piccarft-dmg-x64`）。
 
 ### 一键发布（需要 `gh` CLI）
 
@@ -134,15 +134,15 @@ Tauri 2 CLI 自动查找并合并平台配置 `src-tauri/tauri.macos.conf.json`�
 node scripts/release.mjs
 ```
 
-自动打 tag → 编译 → 创建 GitHub Release → 上传 exe / MSI / NSIS。
+自动按规则创建 RC tag（`vYYYYMMDDRCNN`：首个为 `RC01`，同日递增）→ 编译 → 创建 GitHub Pre-release → 上传 exe / MSI / NSIS。应用内部版本保持独立的语义化版本（例如 `0.3.1`），以满足 Cargo/Tauri/MSI 格式要求。
 
 ### macOS Pre-release（手动流程）
 
-macOS 不走 `release.mjs`（该脚本只负责 Windows 的 exe / MSI / NSIS 与正式 Release）。v0.3.0 macOS 为未签名分发，采用手动 Pre-release：
+macOS 不走 `release.mjs`（该脚本只负责 Windows 的 exe / MSI / NSIS）。v0.3.1 macOS 为未签名分发，采用手动 Pre-release：
 
 1. 朋友在真机按 [macOS 真机验收记录](docs/guide/macos-device-verification.md) 清单确认通过；未覆盖架构标注「仅自动化验证」
 2. 从 CI Artifact 下载两个 DMG：`piccarft-dmg-arm64` / `piccarft-dmg-x64`
-3. 手动创建 GitHub **Pre-release** `v0.3.0`，关联两个 DMG，发布说明写明：未签名 / 未公证、首次打开需 Finder 右键「打开」（见 [macOS Gatekeeper 使用指南](docs/guide/macos-gatekeeper.md)）、架构覆盖情况
+3. 手动创建或更新当前 GitHub **Pre-release**（tag 遵循 `vYYYYMMDDRCNN`，例如 `v20260817RC01`），关联两个 DMG，发布说明写明：未签名 / 未公证、首次打开需 Finder 右键「打开」（见 [macOS Gatekeeper 使用指南](docs/guide/macos-gatekeeper.md)）、架构覆盖情况
 4. 不自动发布：CI 不创建 Release、不打 tag、不上传产物
 
 ### 质量门禁（CI）

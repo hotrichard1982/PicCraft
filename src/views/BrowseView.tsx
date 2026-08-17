@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react"
+import { useEffect, useState, useCallback, useMemo, useReducer, useRef } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { FolderOpen } from "lucide-react"
 import { useAppStore } from "@/store"
@@ -6,7 +6,10 @@ import { ThumbnailGrid } from "@/components/ThumbnailGrid"
 import { StatusBar } from "@/components/StatusBar"
 import { FullscreenViewer } from "@/components/FullscreenViewer"
 import { Sidebar } from "@/components/Sidebar"
-import { useAsyncState } from "@/lib/state-utils"
+import { useAsyncState, createReducer } from "@/lib/state-utils"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import { ArrowRight } from "lucide-react"
 
 export interface DirEntry {
   path: string
@@ -18,6 +21,31 @@ export interface DirEntry {
   created_at: number | null
   modified_at: number | null
 }
+
+// ─── 地址栏状态（浏览模式可输入路径跳转）───
+
+export interface AddressBarState {
+  draft: string
+  editing: boolean
+  error: string | null
+}
+
+export type AddressBarAction =
+  | { type: "startEdit"; folder: string | null }
+  | { type: "setDraft"; value: string }
+  | { type: "cancelEdit" }
+  | { type: "submit" }
+  | { type: "showError"; error: string }
+  | { type: "folderChanged"; folder: string | null }
+
+export const addressBarReducer = createReducer<AddressBarState, AddressBarAction>({ // eslint-disable-line react-refresh/only-export-components
+  startEdit: (_state, action) => ({ draft: action.folder ?? "", editing: true, error: null }),
+  setDraft: (state, action) => ({ ...state, draft: action.value }),
+  cancelEdit: (state) => ({ ...state, draft: "", editing: false, error: null }),
+  submit: (state) => ({ ...state, editing: false, error: null }),
+  showError: (state, action) => ({ ...state, editing: false, error: action.error }),
+  folderChanged: (state, action) => ({ ...state, draft: action.folder ?? "", error: null }),
+})
 
 const THUMB_DEFAULT = 300
 const THUMB_MIN = 100
@@ -33,6 +61,8 @@ export function BrowseView() {
   const [dir, dispatch] = useAsyncState<DirEntry[]>([])
   const [thumbSize, setThumbSize] = useState(THUMB_DEFAULT)
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null)
+  const [bar, dispatchBar] = useReducer(addressBarReducer, { draft: "", editing: false, error: null })
+  const addressSubmittingRef = useRef(false)
 
   // 切换目录时关闭全屏看图：render 阶段条件重置（React 官方模式），避免 effect 中 setState
   const [prevFolder, setPrevFolder] = useState(currentFolder)
@@ -80,6 +110,31 @@ export function BrowseView() {
     [setCurrentFolder],
   )
 
+  // ─── 地址栏提交：校验后跳转，失败显示错误 ───
+  const handleAddressSubmit = useCallback(async () => {
+    if (addressSubmittingRef.current) return
+    const target = bar.draft.trim()
+    if (!target) {
+      dispatchBar({ type: "cancelEdit" })
+      return
+    }
+    addressSubmittingRef.current = true
+    dispatchBar({ type: "submit" })
+    try {
+      await invoke<DirEntry[]>("read_dir", { folder: target })
+      setCurrentFolder(target)
+    } catch (e) {
+      dispatchBar({ type: "showError", error: String(e) })
+    } finally {
+      addressSubmittingRef.current = false
+    }
+  }, [bar.draft, setCurrentFolder])
+
+  // 外部目录变化（侧边栏/启动）时同步地址栏草稿并清错误
+  useEffect(() => {
+    dispatchBar({ type: "folderChanged", folder: currentFolder })
+  }, [currentFolder])
+
   // ─── 缩略图大小调节（双绑）───
   const bumpThumbSize = useCallback((delta: number) => {
     setThumbSize((s) => {
@@ -125,13 +180,33 @@ export function BrowseView() {
 
       {/* 主内容区 */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* 缩略图大小控制条 */}
-        <div className="flex items-center justify-end px-4 py-1.5 border-b bg-card/30">
-          {currentFolder && (
-            <div className="text-xs text-muted-foreground tabular-nums">
-              <span className="font-mono">{currentFolder}</span>
-              <span className="ml-3">缩略图 {thumbSize}px</span>
-            </div>
+        {/* 地址栏 + 缩略图大小控制条 */}
+        <div className="flex items-center gap-2 px-4 py-1.5 border-b bg-card/30">
+          <Input
+            className="h-7 text-xs font-mono flex-1 min-w-0"
+            value={bar.editing ? bar.draft : (currentFolder ?? "")}
+            readOnly={!bar.editing}
+            placeholder="输入目录路径后回车"
+            onFocus={() => dispatchBar({ type: "startEdit", folder: currentFolder })}
+            onChange={(e) => dispatchBar({ type: "setDraft", value: e.target.value })}
+            onBlur={() => {
+              if (bar.editing) void handleAddressSubmit()
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleAddressSubmit()
+              if (e.key === "Escape") dispatchBar({ type: "cancelEdit" })
+            }}
+          />
+          {bar.editing && (
+            <Button variant="ghost" size="sm" className="h-7 px-2 shrink-0" onClick={() => void handleAddressSubmit()}>
+              <ArrowRight className="size-3.5" />
+            </Button>
+          )}
+          {bar.error && (
+            <span className="text-xs text-destructive truncate max-w-40" title={bar.error}>{bar.error}</span>
+          )}
+          {currentFolder && !bar.editing && (
+            <span className="text-xs text-muted-foreground tabular-nums shrink-0">缩略图 {thumbSize}px</span>
           )}
         </div>
 

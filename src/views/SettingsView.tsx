@@ -240,7 +240,7 @@ function AboutSubTab() {
 
       <div className="text-center">
         <h2 className="text-2xl font-bold">图轻剪 PicCraft</h2>
-        <p className="text-sm text-muted-foreground mt-1">v0.3.0</p>
+        <p className="text-sm text-muted-foreground mt-1">v0.3.1</p>
       </div>
 
       <Separator />

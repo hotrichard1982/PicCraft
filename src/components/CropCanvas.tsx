@@ -45,6 +45,8 @@ interface CropCanvasProps {
   onFileDrop: (path: string) => void
   cropRect: CropRect | null
   onApplyTransform?: (params: { rotations: number; flipH: boolean; flipV: boolean }) => void
+  /** 工具组扩展按钮（撤销/重做/重置），由 SingleTab 注入 */
+  toolbarExtra?: React.ReactNode
 }
 
 const IMG_EXTS = ["jpg", "jpeg", "png", "webp", "bmp"]
@@ -81,7 +83,7 @@ export const transformReducer = createReducer<TransformState, TransformAction>({
   reset: () => ({ rotations: 0, flipH: false, flipV: false }),
 })
 
-function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onApplyTransform }: CropCanvasProps) {
+function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onApplyTransform, toolbarExtra }: CropCanvasProps) {
   const stageRef = useRef<Konva.Stage>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
   const rectRef = useRef<Konva.Rect>(null)
@@ -106,17 +108,14 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onAppl
   // UI 状态
   interface UIState {
     isDragOver: boolean
-    toolbarVisible: boolean
   }
   type UIAction =
     | { type: "setDragOver"; value: boolean }
-    | { type: "setToolbarVisible"; value: boolean }
 
   const uiReducer = createReducer<UIState, UIAction>({
     setDragOver: (state, action) => ({ ...state, isDragOver: action.value }),
-    setToolbarVisible: (state, action) => ({ ...state, toolbarVisible: action.value }),
   })
-  const [ui, dispatchUI] = useReducer(uiReducer, { isDragOver: false, toolbarVisible: false })
+  const [ui, dispatchUI] = useReducer(uiReducer, { isDragOver: false })
 
   // 变换状态（旋转/翻转，纯前端预览）
   const [transform, dispatchTransform] = useReducer(transformReducer, { rotations: 0, flipH: false, flipV: false })
@@ -466,18 +465,14 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onAppl
   return (
     <div
       ref={containerRef}
-      onMouseEnter={() => dispatchUI({ type: "setToolbarVisible", value: true })}
-      onMouseLeave={() => dispatchUI({ type: "setToolbarVisible", value: false })}
       className={`relative flex-1 bg-muted/30 m-3 rounded-xl overflow-hidden border-2 border-dashed transition-colors ${
         ui.isDragOver ? "border-primary border-solid bg-primary/5" : "border-muted-foreground/25"
       }`}
     >
-      {/* Floating transform toolbar */}
+      {/* 顶部工具组：变换（翻转/旋转）+ 编辑历史（撤销/重做/重置），常驻可见 */}
       {imagePath && imgLoad.image && (
         <div
-          className={`absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 p-1 rounded-lg bg-card/95 border shadow-lg backdrop-blur-sm transition-all duration-200 ${
-            ui.toolbarVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2 pointer-events-none"
-          }`}
+          className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 p-1 rounded-lg bg-card/95 border shadow-lg backdrop-blur-sm"
         >
           {TOOLBAR_BUTTONS.map(({ mode, label, icon: Icon }) => (
             <button
@@ -508,6 +503,12 @@ function CropCanvasInner({ imagePath, onCropChange, onFileDrop, cropRect, onAppl
             >
               应用
             </button>
+          )}
+          {toolbarExtra && (
+            <>
+              <div className="w-px h-5 bg-border mx-0.5" />
+              {toolbarExtra}
+            </>
           )}
         </div>
       )}
