@@ -359,32 +359,43 @@ fn batch_result_with_truncation_warning(result: String, truncated: bool) -> Stri
     }
 }
 
-/// 同批次重名时自动加后缀（_1、_2…），返回唯一文件名；不重名返回原文件名
-fn unique_batch_name(path: &Path, used_names: &mut std::collections::HashSet<String>) -> String {
-    let filename = path
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-    if used_names.insert(filename.clone()) {
-        return filename;
+/// 归一化目标输出扩展名：output_format 为空 → 继承输入扩展名（保持原格式）；
+/// 否则将 jpeg/jpg 统一为 jpg，仅允许 jpg/png/webp/bmp 四种目标格式。
+fn resolve_output_ext(input: &Path, output_format: &str) -> Result<String, String> {
+    let ext = output_format.trim().to_ascii_lowercase();
+    if ext.is_empty() {
+        return Ok(input
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| if e.eq_ignore_ascii_case("jpeg") { "jpg" } else { e })
+            .map(|e| e.to_ascii_lowercase())
+            .unwrap_or_else(|| "jpg".to_string()));
     }
+    match ext.as_str() {
+        "jpg" | "jpeg" => Ok("jpg".to_string()),
+        "png" | "webp" | "bmp" => Ok(ext),
+        other => Err(format!("不支持的输出格式: {other}")),
+    }
+}
+
+/// 生成批次输出文件名（stem + 目标扩展名）；同 target_ext 重名时自动加后缀（_1、_2…）。
+fn unique_batch_name(
+    path: &Path,
+    target_ext: &str,
+    used_names: &mut std::collections::HashSet<String>,
+) -> String {
     let stem = path
         .file_stem()
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    let ext = path
-        .extension()
-        .map(|e| format!(".{}", e.to_string_lossy()))
-        .unwrap_or_default();
     let mut idx = 1u32;
-    let mut candidate = format!("{}_{}{}", stem, idx, ext);
-    while !used_names.insert(candidate.clone()) {
+    let mut name = format!("{stem}.{target_ext}");
+    while !used_names.insert(name.clone()) {
+        name = format!("{stem}_{idx}.{target_ext}");
         idx += 1;
-        candidate = format!("{}_{}{}", stem, idx, ext);
     }
-    candidate
+    name
 }
 
 /// 批量处理：按目标宽度等比缩放文件夹内所有图片
@@ -395,6 +406,7 @@ pub async fn batch_process(
     output_dir: String,
     target_width: u32,
     quality: u8,
+    output_format: String,
 ) -> Result<String, String> {
     if target_width == 0 {
         return Err("目标宽度必须大于 0".to_string());
@@ -416,7 +428,7 @@ pub async fn batch_process(
         return Err("目录中没有图片文件".to_string());
     }
 
-    let result = execute_batch_processing(app, entries, output_dir, target_width, quality).await?;
+    let result = execute_batch_processing(app, entries, output_dir, target_width, quality, output_format).await?;
     Ok(batch_result_with_truncation_warning(result, truncated))
 }
 
@@ -428,6 +440,7 @@ pub async fn batch_process_queue(
     output_dir: String,
     target_width: u32,
     quality: u8,
+    output_format: String,
 ) -> Result<String, String> {
     if target_width == 0 { return Err("目标宽度必须大于 0".to_string()); }
     if paths.is_empty() { return Err("队列为空".to_string()); }
@@ -439,10 +452,10 @@ pub async fn batch_process_queue(
     if entries.is_empty() { return Err("队列中的文件全部失效".to_string()); }
     let output_dir_clone = output_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        std::fs::create_dir_all(&output_dir_clone).map_err(|e| format!("创建输出目录失败: {e}"))
+        std::fs::create_dir_all(&output_dir_clone).map_err(|e| format!("创建目录任务失败: {e}"))
     }).await.map_err(|e| format!("创建目录任务失败: {e}"))??;
 
-    execute_batch_processing(app, entries, output_dir, target_width, quality).await
+    execute_batch_processing(app, entries, output_dir, target_width, quality, output_format).await
 }
 
 /// 执行批量处理的核心逻辑（内部函数）
@@ -452,19 +465,22 @@ async fn execute_batch_processing(
     output_dir: String,
     target_width: u32,
     quality: u8,
+    output_format: String,
 ) -> Result<String, String> {
     let total = entries.len();
     let mut errors = Vec::new();
     let mut used_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (i, path) in entries.iter().enumerate() {
         let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-        // 同名文件自动重命名，避免覆盖
-        let unique_name = unique_batch_name(path, &mut used_names);
+        // 目标扩展名：保持原格式用输入扩展名，否则用目标格式；命名加入重名去重，避免覆盖
+        let target_ext = resolve_output_ext(path, &output_format)?;
+        let unique_name = unique_batch_name(path, &target_ext, &mut used_names);
         let out_path = PathBuf::from(&output_dir).join(&unique_name);
         let path_clone = path.clone();
         let out_path_clone = out_path.clone();
+        let format_clone = output_format.clone();
         let result = tauri::async_runtime::spawn_blocking(move || {
-            process_single_batch(&path_clone, &out_path_clone, target_width, quality)
+            process_single_batch(&path_clone, &out_path_clone, target_width, quality, format_clone)
         }).await.map_err(|e| format!("任务执行失败: {e}"))?;
         match result {
             Ok(()) => {
@@ -493,6 +509,7 @@ fn process_single_batch(
     output: &Path,
     target_width: u32,
     quality: u8,
+    output_format: String,
 ) -> Result<(), String> {
     if target_width == 0 { return Err("目标宽度必须大于 0".to_string()); }
     check_file_size_path(input)?;
@@ -501,11 +518,9 @@ fn process_single_batch(
     if w == 0 { return Err("图片宽度为 0，无法处理".to_string()); }
     let th = (h as f64 * (target_width as f64 / w as f64)) as u32;
     let resized = img.resize_exact(target_width, th.max(1), FilterType::Lanczos3);
-    let ext = input.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
-        .unwrap_or_else(|| "jpg".to_string());
-    match ext.as_str() {
+    // 目标格式：output_format 为空 → 继承输入扩展名（保持原格式）
+    let out_ext = resolve_output_ext(input, &output_format)?;
+    match out_ext.as_str() {
         "png" => { resized.save(output).map_err(|e| format!("PNG 保存失败: {e}"))?; }
         "webp" => { resized.save(output).map_err(|e| format!("WebP 保存失败: {e}"))?; }
         "bmp" => {
@@ -1977,16 +1992,16 @@ mod tests {
         assert!(err.contains("安全限制"), "敏感路径应被拒绝: {err}");
     }
 
-    // ── 批量命名（WORK-003-04 前端确认的后端行为依据）──
+    // ── 批量命名（WORK-003-04 前端确认的后端行为依据）+ 格式转换（PLAN-009）──
 
     #[cfg(windows)]
     #[test]
     fn test_unique_batch_name_duplicates_suffixed() {
         let mut used = std::collections::HashSet::new();
         let p = Path::new(r"D:\photos\a.png");
-        assert_eq!(unique_batch_name(p, &mut used), "a.png");
-        assert_eq!(unique_batch_name(p, &mut used), "a_1.png");
-        assert_eq!(unique_batch_name(p, &mut used), "a_2.png");
+        assert_eq!(unique_batch_name(p, "png", &mut used), "a.png");
+        assert_eq!(unique_batch_name(p, "png", &mut used), "a_1.png");
+        assert_eq!(unique_batch_name(p, "png", &mut used), "a_2.png");
     }
 
     #[cfg(windows)]
@@ -1994,18 +2009,55 @@ mod tests {
     fn test_unique_batch_name_distinct_filenames_kept() {
         let mut used = std::collections::HashSet::new();
         assert_eq!(
-            unique_batch_name(Path::new(r"D:\photos\a.png"), &mut used),
+            unique_batch_name(Path::new(r"D:\photos\a.png"), "png", &mut used),
             "a.png"
         );
         assert_eq!(
-            unique_batch_name(Path::new(r"D:\photos\b.jpg"), &mut used),
+            unique_batch_name(Path::new(r"D:\photos\b.jpg"), "jpg", &mut used),
             "b.jpg"
         );
         // 同 stem 不同扩展名视为不同文件名
         assert_eq!(
-            unique_batch_name(Path::new(r"D:\photos\a.jpg"), &mut used),
+            unique_batch_name(Path::new(r"D:\photos\a.jpg"), "jpg", &mut used),
             "a.jpg"
         );
+    }
+
+    #[test]
+    fn test_unique_batch_name_format_conversion_replaces_ext() {
+        // 转格式时输出名用目标扩展名（PLAN-009）
+        let mut used = std::collections::HashSet::new();
+        assert_eq!(
+            unique_batch_name(Path::new(r"D:\photos\a.jpg"), "png", &mut used),
+            "a.png"
+        );
+        assert_eq!(
+            unique_batch_name(Path::new(r"D:\photos\a.jpg"), "png", &mut used),
+            "a_1.png"
+        );
+    }
+
+    #[test]
+    fn test_resolve_output_ext_empty_inherits_input() {
+        // 空格式 → 继承输入扩展名，jpeg/jpg 统一为 jpg
+        assert_eq!(resolve_output_ext(Path::new("x.png"), "").unwrap(), "png");
+        assert_eq!(resolve_output_ext(Path::new("x.jpeg"), "").unwrap(), "jpg");
+        assert_eq!(resolve_output_ext(Path::new("x.JPG"), "").unwrap(), "jpg");
+    }
+
+    #[test]
+    fn test_resolve_output_ext_target_formats() {
+        assert_eq!(resolve_output_ext(Path::new("x.png"), "jpg").unwrap(), "jpg");
+        assert_eq!(resolve_output_ext(Path::new("x.png"), "jpeg").unwrap(), "jpg");
+        assert_eq!(resolve_output_ext(Path::new("x.jpg"), "png").unwrap(), "png");
+        assert_eq!(resolve_output_ext(Path::new("x.jpg"), "webp").unwrap(), "webp");
+        assert_eq!(resolve_output_ext(Path::new("x.jpg"), "bmp").unwrap(), "bmp");
+        assert_eq!(resolve_output_ext(Path::new("x.jpg"), "PNG").unwrap(), "png");
+    }
+
+    #[test]
+    fn test_resolve_output_ext_rejects_unknown() {
+        assert!(resolve_output_ext(Path::new("x.jpg"), "gif").is_err());
     }
 
     #[test]
@@ -2013,7 +2065,7 @@ mod tests {
         // ADR-0004 后端行为依据：输出 == 输入且不重名 → 直接覆盖原图（原地替换工作流，允许）
         let dir = test_work_dir("batch_overwrite");
         let img = make_test_image(&dir, "src", 100, 80, "png");
-        let result = process_single_batch(&img, &img, 50, 60);
+        let result = process_single_batch(&img, &img, 50, 60, "".to_string());
         assert!(result.is_ok(), "同目录覆盖应成功: {:?}", result);
         assert!(img.exists(), "覆盖后文件应存在");
         assert_eq!(img_dims(&img), (50, 40), "原图应按目标宽度等比缩小并覆盖");
@@ -2025,7 +2077,7 @@ mod tests {
         let dir = test_work_dir("batch_suffix");
         let img = make_test_image(&dir, "src", 100, 80, "png");
         let out = dir.join("src_1.png");
-        let result = process_single_batch(&img, &out, 50, 60);
+        let result = process_single_batch(&img, &out, 50, 60, "".to_string());
         assert!(result.is_ok());
         assert!(
             img.exists() && out.exists(),
@@ -2040,7 +2092,7 @@ mod tests {
         let dir = test_work_dir("batch_jpeg");
         let img = make_test_image(&dir, "src", 100, 80, "png");
         let out = dir.join("out.jpg");
-        let result = process_single_batch(&img, &out, 50, 60);
+        let result = process_single_batch(&img, &out, 50, 60, "jpg".to_string());
         assert!(result.is_ok());
         let bytes = std::fs::read(&out).unwrap();
         assert_eq!(&bytes[..2], &[0xFF, 0xD8], "png 输入 + jpg 输出应生成 JPEG");
@@ -2049,10 +2101,49 @@ mod tests {
     }
 
     #[test]
+    fn test_process_single_batch_convert_png_to_webp() {
+        let dir = test_work_dir("batch_to_webp");
+        let img = make_test_image(&dir, "src", 100, 80, "png");
+        let out = dir.join("out.webp");
+        let result = process_single_batch(&img, &out, 50, 60, "webp".to_string());
+        assert!(result.is_ok());
+        let bytes = std::fs::read(&out).unwrap();
+        assert_eq!(&bytes[..4], b"RIFF", "应生成 WebP");
+        assert_eq!(img_dims(&out), (50, 40));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_process_single_batch_convert_png_to_bmp() {
+        let dir = test_work_dir("batch_to_bmp");
+        let img = make_test_image(&dir, "src", 100, 80, "png");
+        let out = dir.join("out.bmp");
+        let result = process_single_batch(&img, &out, 50, 60, "bmp".to_string());
+        assert!(result.is_ok());
+        let bytes = std::fs::read(&out).unwrap();
+        assert_eq!(&bytes[..2], b"BM", "应生成 BMP");
+        assert_eq!(img_dims(&out), (50, 40));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_process_single_batch_convert_jpg_to_png() {
+        let dir = test_work_dir("batch_to_png");
+        let img = make_test_image(&dir, "src", 100, 80, "jpg");
+        let out = dir.join("out.png");
+        let result = process_single_batch(&img, &out, 50, 60, "png".to_string());
+        assert!(result.is_ok());
+        let bytes = std::fs::read(&out).unwrap();
+        assert_eq!(&bytes[..8], &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A], "应生成 PNG");
+        assert_eq!(img_dims(&out), (50, 40));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn test_process_single_batch_zero_width_rejected() {
         let dir = test_work_dir("batch_zero");
         let img = make_test_image(&dir, "src", 100, 80, "png");
-        assert!(process_single_batch(&img, &img, 0, 60).is_err());
+        assert!(process_single_batch(&img, &img, 0, 60, "".to_string()).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

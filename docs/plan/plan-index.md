@@ -27,4 +27,5 @@
 | WORK-005-01 | [崩溃取证与修复实施](WORK-005-01-macos-crash-fix.md) | PLAN-005 / BUG-002 | ✅ 已完成 |
 | PLAN-006 | [单图编辑比例修复与撤销、浏览地址栏](PLAN-006-单图编辑保持原图比例换算错误.md) | BUG-003 | ✅ 已完成 |
 | PLAN-007 | [假扩展名图片修复与预览区工具按钮组](PLAN-007-假扩展名图片加载失败.md) | BUG-004 | ✅ 已完成 |
-| PLAN-008 | [macOS DMG 自动上传 GitHub Release](PLAN-008-macos-dmg-自动上传-release.md) | 发布流程改进 | 🚧 实施中 |
+| PLAN-008 | [macOS DMG 自动上传 GitHub Release](PLAN-008-macos-dmg-自动上传-release.md) | 发布流程改进 | ✅ 已完成 |
+| PLAN-009 | [批量处理界面增加格式转换功能](PLAN-009-批次格式转换功能.md) | PRD-001 | ✅ 已完成 |

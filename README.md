@@ -42,6 +42,7 @@
 - 按目标宽度等比缩放（Lanczos3），异步处理（tokio），进度实时显示
 - 保留旧 `batch_process` 命令（向后兼容）
 - JPEG 压缩质量可调（1-100）
+- 输出格式可转换：保持原格式（默认）/ JPG / PNG / WebP / BMP；转格式时输出为目标扩展名新文件，原文件始终保留（原地处理也不删除原图）
 - 输出目录持久化（Tauri Store，tauri-plugin-store）
 
 ### 设置视图

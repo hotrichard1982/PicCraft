@@ -61,6 +61,15 @@ export const batchRunReducer = createReducer<BatchRunState, BatchRunAction>({ //
   finish: (state) => ({ ...state, processing: false }),
 })
 
+// 输出格式选项：空字符串表示保持原格式（PLAN-009）
+const OUTPUT_FORMATS: { value: string; label: string }[] = [
+  { value: "", label: "保持原格式" },
+  { value: "jpg", label: "JPG" },
+  { value: "png", label: "PNG" },
+  { value: "webp", label: "WebP" },
+  { value: "bmp", label: "BMP" },
+]
+
 export function BatchTab() {
   const queue = useAppStore((s) => s.queue)
   const updateQueueItem = useAppStore((s) => s.updateQueueItem)
@@ -72,6 +81,7 @@ export function BatchTab() {
   const [outputDir, setOutputDir] = useState("")
   const [targetWidth, setTargetWidth] = useState("1000")
   const [quality, setQuality] = useState("60")
+  const [outputFormat, setOutputFormat] = useState("")
   const [run, dispatchRun] = useReducer(batchRunReducer, {
     processing: false, progress: { current: 0, total: 0, filename: "", path: "", error: null }, errors: [], listenFailed: false,
   })
@@ -156,6 +166,7 @@ export function BatchTab() {
         outputDir,
         targetWidth: parseInt(targetWidth) || 1000,
         quality: parseInt(quality) || 60,
+        outputFormat,
       })
       setStatusText(msg)
     } catch (e) {
@@ -168,7 +179,7 @@ export function BatchTab() {
         if (q.status === "processing") updateQueueItem(q.path, { status: "failed", error: "处理中断" })
       })
     }
-  }, [queue, outputDir, targetWidth, quality, updateQueueItem])
+  }, [queue, outputDir, targetWidth, quality, outputFormat, updateQueueItem])
 
   return (
     <div className="h-full flex">
@@ -194,7 +205,9 @@ export function BatchTab() {
                 <FolderOpen className="size-3" />
               </Button>
             </div>
-            <p className="text-[10px] text-muted-foreground">处理后的图片会按原文件名保存到此目录</p>
+            <p className="text-[10px] text-muted-foreground">
+              处理后的图片会按原文件名保存到此目录。选了目标格式时保存为新扩展名文件，原文件始终保留。
+            </p>
           </div>
 
           <Separator />
@@ -229,6 +242,29 @@ export function BatchTab() {
                 />
                 <span className="text-xs text-muted-foreground">1-100</span>
               </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* 输出格式（分段单选，PLAN-009） */}
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">输出格式</Label>
+            <div className="flex flex-wrap gap-1">
+              {OUTPUT_FORMATS.map((f) => (
+                <Button
+                  key={f.value}
+                  type="button"
+                  variant={outputFormat === f.value ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 text-xs px-3"
+                  onClick={() => setOutputFormat(f.value)}
+                  disabled={run.processing}
+                  aria-pressed={outputFormat === f.value}
+                >
+                  {f.label}
+                </Button>
+              ))}
             </div>
           </div>
 

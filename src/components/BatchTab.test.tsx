@@ -125,6 +125,7 @@ describe("BatchTab 输出目录等于输入目录的二次确认", () => {
       outputDir: "D:/photos",
       targetWidth: 1000,
       quality: 60,
+      outputFormat: "",
     })
   })
 
@@ -144,5 +145,14 @@ describe("BatchTab 输出目录等于输入目录的二次确认", () => {
     await waitFor(() => expect(invoke).toHaveBeenCalled())
     expect(confirm).not.toHaveBeenCalled()
     expect(invoke).toHaveBeenCalledWith("batch_process_queue", expect.objectContaining({ outputDir: "D:/output" }))
+  })
+
+  it("选择输出格式 PNG 后，开始处理把 outputFormat 传给后端", async () => {
+    await renderWithOutputDir("D:/output")
+    fireEvent.click(screen.getByRole("button", { name: "PNG" }))
+    expect(screen.getByRole("button", { name: "PNG" }).getAttribute("aria-pressed")).toBe("true")
+    fireEvent.click(screen.getByRole("button", { name: /开始处理/ }))
+    await waitFor(() => expect(invoke).toHaveBeenCalled())
+    expect(invoke).toHaveBeenCalledWith("batch_process_queue", expect.objectContaining({ outputFormat: "png" }))
   })
 })
