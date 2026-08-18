@@ -2025,14 +2025,14 @@ mod tests {
 
     #[test]
     fn test_unique_batch_name_format_conversion_replaces_ext() {
-        // 转格式时输出名用目标扩展名（PLAN-009）
+        // 转格式时输出名用目标扩展名（PLAN-009）；用平台无关相对路径，各平台语义一致
         let mut used = std::collections::HashSet::new();
         assert_eq!(
-            unique_batch_name(Path::new(r"D:\photos\a.jpg"), "png", &mut used),
+            unique_batch_name(Path::new("a.jpg"), "png", &mut used),
             "a.png"
         );
         assert_eq!(
-            unique_batch_name(Path::new(r"D:\photos\a.jpg"), "png", &mut used),
+            unique_batch_name(Path::new("a.jpg"), "png", &mut used),
             "a_1.png"
         );
     }
