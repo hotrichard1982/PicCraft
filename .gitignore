@@ -38,6 +38,18 @@ __pycache__/
 *.njsproj
 *.sln
 *.sw?
+
+# AI 工具本地会话与缓存（仅本地，不上传）
+.claude/
+.codebuddy/
+.continue/
+.iflow/
+.qoder/
+.trae/
+
+# 临时工作目录
+.tmp/
+
 release-assets/
 .qoderignore
 AGENTS.md
